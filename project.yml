@@ -13,6 +13,8 @@ targets:
     platform: iOS
     sources:
       - path: Ezcan
+    resources:
+      - path: ezcan_logo.png
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.undu.ezcan

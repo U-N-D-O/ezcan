@@ -29,10 +29,11 @@ struct PairingView: View {
         NavigationStack {
             Form {
                 Section {
-                    Image(systemName: "iphone.and.arrow.forward")
-                        .font(.system(size: 44))
+                    Image("ezcan_logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 128, height: 128)
                         .frame(maxWidth: .infinity)
-                        .foregroundStyle(.blue)
                     Text("Connect Ezcan to the computer on your private Wi-Fi network.")
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)

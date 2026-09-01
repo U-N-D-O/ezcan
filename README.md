@@ -7,6 +7,8 @@ Ezcan is a Pokemon card workflow with two parts:
 
 The iOS app is in the repository root. The Windows companion program is in `computer/`.
 
+The iOS app uses `ezcan_logo.png` as its bundled welcome-screen logo.
+
 ## Current MVP
 
 - Pair with the computer using a QR code or manual URL and token.
