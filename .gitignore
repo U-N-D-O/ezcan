@@ -11,3 +11,10 @@ xcuserdata/
 
 # Local app data
 .local/
+
+# Python and PyInstaller
+__pycache__/
+*.py[cod]
+dist/
+*.spec
+.venv/
