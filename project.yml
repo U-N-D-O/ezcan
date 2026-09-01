@@ -18,6 +18,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.undu.ezcan
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSCameraUsageDescription: "Ezcan uses the camera to photograph Pokemon cards."
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Ezcan uses the microphone when recording card videos."

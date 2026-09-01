@@ -38,6 +38,15 @@ jobs:
           cp -R device-build/Build/Products/Release-iphoneos/Ezcan.app "$RUNNER_TEMP/ezcan-ipa/Payload/"
           ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/ezcan-ipa/Payload" Ezcan-unsigned.ipa
 
+      - name: Validate IPA metadata
+        run: |
+          app="$RUNNER_TEMP/ezcan-ipa/Payload/Ezcan.app"
+          test -f "Ezcan-unsigned.ipa"
+          test -f "$app/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist" | grep -qx "com.undu.ezcan"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Info.plist" | grep -qx "1.0"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$app/Info.plist" | grep -qx "1"
+
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
