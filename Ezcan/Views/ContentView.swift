@@ -166,8 +166,7 @@ struct CardCaptureFlowView: View {
             await prepareIntake()
         }
         .fullScreenCover(isPresented: cameraPresentation) {
-            if let activeCameraStage {
-                let cameraStage = activeCameraStage
+            if let cameraStage = activeCameraStage {
                 GuidedCameraView(
                     title: cameraStage.title,
                     mode: cameraStage.cameraMode,

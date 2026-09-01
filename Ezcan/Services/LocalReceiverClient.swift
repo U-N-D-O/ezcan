@@ -72,13 +72,16 @@ struct LocalReceiverClient {
         try await completeIntake(intakeId, archiveCode: nil)
     }
 
-    func completeIntake(_ intakeId: String, archiveCode: String) async throws -> ArchiveReceipt {
+    func completeIntake(_ intakeId: String, archiveCode: String?) async throws -> ArchiveReceipt {
         let request = try makeRequest(
             path: "api/intakes/\(intakeId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? intakeId)/complete",
             method: "POST",
             contentType: "application/json"
         )
-        let payload = ["archiveCode": archiveCode]
+        var payload: [String: String] = [:]
+        if let archiveCode {
+            payload["archiveCode"] = archiveCode
+        }
         let body = try JSONSerialization.data(withJSONObject: payload)
         let (data, response) = try await URLSession.shared.upload(for: request, from: body)
         try validate(response)
