@@ -4,13 +4,16 @@ import UIKit
 
 struct ContentView: View {
     @EnvironmentObject private var pairingStore: PairingStore
+    @State private var requiresLaunchPairing = true
 
     var body: some View {
         Group {
-            if pairingStore.isPaired {
+            if pairingStore.isPaired && !requiresLaunchPairing {
                 CardCaptureFlowView()
             } else {
-                PairingView()
+                PairingView {
+                    requiresLaunchPairing = false
+                }
             }
         }
     }
@@ -18,6 +21,7 @@ struct ContentView: View {
 
 struct PairingView: View {
     @EnvironmentObject private var pairingStore: PairingStore
+    let onPaired: () -> Void
     @State private var computerURL = "http://"
     @State private var token = ""
     @State private var computerName = ""
@@ -76,6 +80,9 @@ struct PairingView: View {
                     showingScanner = false
                 }
             }
+            .onAppear {
+                showingScanner = true
+            }
         }
     }
 
@@ -86,6 +93,7 @@ struct PairingView: View {
         }
         do {
             pairingStore.pair(with: try PairingCode(url: url, token: token, computerName: computerName.isEmpty ? nil : computerName))
+            onPaired()
         } catch {
             pairingStore.errorMessage = error.localizedDescription
         }
@@ -94,6 +102,7 @@ struct PairingView: View {
     private func pairFromPayload() {
         do {
             pairingStore.pair(with: try PairingCode.decode(qrPayload))
+            onPaired()
         } catch {
             pairingStore.errorMessage = error.localizedDescription
         }
