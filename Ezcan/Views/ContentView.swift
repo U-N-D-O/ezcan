@@ -1,7 +1,5 @@
 import AVFoundation
-import PhotosUI
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var pairingStore: PairingStore
@@ -9,7 +7,7 @@ struct ContentView: View {
     var body: some View {
         Group {
             if pairingStore.isPaired {
-                DashboardView()
+                CardCaptureFlowView()
             } else {
                 PairingView()
             }
@@ -101,173 +99,546 @@ struct PairingView: View {
     }
 }
 
-struct DashboardView: View {
-    @EnvironmentObject private var pairingStore: PairingStore
+enum CaptureStage: Equatable {
+    case front
+    case back
+    case additional
+    case video
+}
 
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Connected computer") {
-                    Label(pairingStore.pairing?.computerName ?? pairingStore.pairing?.url.host ?? "Computer", systemImage: "desktopcomputer")
-                    Text(pairingStore.pairing?.url.absoluteString ?? "")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section {
-                    NavigationLink {
-                        NewCardView()
-                    } label: {
-                        Label("New card", systemImage: "plus.viewfinder")
-                    }
-                }
-
-                Section {
-                    Button("Disconnect computer", role: .destructive) {
-                        pairingStore.unpair()
-                    }
-                }
-            }
-            .navigationTitle("Ezcan")
+extension CaptureStage {
+    var title: String {
+        switch self {
+        case .front: return "Front"
+        case .back: return "Back"
+        case .additional: return "Additional"
+        case .video: return "Video"
         }
+    }
+
+    var cameraMode: GuidedCameraView.Mode {
+        self == .video ? .video : .photo
     }
 }
 
-struct NewCardView: View {
+struct CardCaptureFlowView: View {
     @EnvironmentObject private var pairingStore: PairingStore
-    @State private var media: [CapturedMedia] = []
-    @State private var note = ""
-    @State private var showingCamera = false
-    @State private var cameraType: UTType = .image
-    @State private var selectedPhotos: [PhotosPickerItem] = []
-    @State private var isUploading = false
-    @State private var uploadMessage: String?
+    @State private var intakeID: String?
+    @State private var archiveCode = ""
+    @State private var stage: CaptureStage?
+    @State private var activeCameraStage: CaptureStage?
+    @State private var showingNaming = false
+    @State private var isPreparing = true
+    @State private var isSending = false
+    @State private var capturedMedia: [CapturedMedia] = []
+    @State private var nameCounters: [String: Int] = [:]
+    @State private var statusMessage: String?
+    @State private var completedCode: String?
+    @State private var hasLoaded = false
 
     var body: some View {
-        Form {
-            Section {
-                Text("Keep one card per intake. Add a front photo, back photo, detail photos, and an optional surface video.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.04, green: 0.07, blue: 0.14), Color(red: 0.02, green: 0.03, blue: 0.06)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
 
-            Section("Capture") {
-                Button {
-                    cameraType = .image
-                    showingCamera = true
-                } label: {
-                    Label("Take photo", systemImage: "camera")
-                }
-                Button {
-                    cameraType = .movie
-                    showingCamera = true
-                } label: {
-                    Label("Record video", systemImage: "video")
-                }
-                PhotosPicker(selection: $selectedPhotos, matching: .any(of: [.images, .videos])) {
-                    Label("Choose from Photos", systemImage: "photo.on.rectangle")
-                }
-                .onChange(of: selectedPhotos) { _, items in
-                    Task { await importPhotos(items) }
-                }
-            }
-
-            if !media.isEmpty {
-                Section("Media (\(media.count))") {
-                    ForEach(media) { item in
-                        Label(item.fileName, systemImage: item.kind == .image ? "photo" : "video")
-                    }
-                    .onDelete { offsets in
-                        media.remove(atOffsets: offsets)
-                    }
-                }
-            }
-
-            Section("Note") {
-                TextField("Optional condition or handling note", text: $note, axis: .vertical)
-            }
-
-            Section {
-                Button {
-                    Task { await uploadIntake() }
-                } label: {
-                    if isUploading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Label("Send to computer", systemImage: "arrow.up.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .disabled(media.isEmpty || isUploading)
-            }
-
-            if let uploadMessage {
-                Section {
-                    Text(uploadMessage)
-                        .foregroundStyle(uploadMessage.hasPrefix("Archive code") ? .green : .red)
-                }
+            if let completedCode {
+                completedView(code: completedCode)
+            } else if isPreparing {
+                preparingView
+            } else if showingNaming {
+                namingView
+            } else if let stage {
+                flowView(for: stage)
+            } else {
+                optionMenu
             }
         }
-        .navigationTitle("New card")
-        .sheet(isPresented: $showingCamera) {
-            CameraCaptureView(mediaType: cameraType) { capturedMedia in
-                media.append(capturedMedia)
-                showingCamera = false
-            } onCancel: {
-                showingCamera = false
+        .preferredColorScheme(.dark)
+        .task {
+            guard !hasLoaded else { return }
+            hasLoaded = true
+            await prepareIntake()
+        }
+        .fullScreenCover(isPresented: cameraPresentation) {
+            if let activeCameraStage {
+                let cameraStage = activeCameraStage
+                GuidedCameraView(
+                    title: cameraStage.title,
+                    mode: cameraStage.cameraMode,
+                    onPhoto: { media in
+                        activeCameraStage = nil
+                        accept(media, for: cameraStage)
+                    },
+                    onVideo: { media in
+                        activeCameraStage = nil
+                        accept(media, for: cameraStage)
+                    },
+                    onBack: {
+                        activeCameraStage = nil
+                        moveBack(from: cameraStage)
+                    },
+                    onNext: {
+                        activeCameraStage = nil
+                        advanceWithoutCapture(from: cameraStage)
+                    },
+                    onCancel: {
+                        activeCameraStage = nil
+                    }
+                )
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
         }
     }
 
-    private func importPhotos(_ items: [PhotosPickerItem]) async {
-        for item in items {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            let isVideo = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
-            let fileExtension = isVideo ? "mov" : "jpg"
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension(fileExtension)
+    private var cameraPresentation: Binding<Bool> {
+        Binding(
+            get: { activeCameraStage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    activeCameraStage = nil
+                }
+            }
+        )
+    }
+
+    private var preparingView: some View {
+        VStack(spacing: 18) {
+            Image("ezcan_logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 120, height: 120)
+            ProgressView()
+                .tint(.white)
+            Text("Preparing your card")
+                .font(.headline)
+            Text("The front camera will open automatically.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.65))
+        }
+        .padding(30)
+    }
+
+    private func flowView(for currentStage: CaptureStage) -> some View {
+        VStack(spacing: 0) {
+            flowHeader
+            Spacer()
+            VStack(spacing: 16) {
+                Text(currentStage.title.uppercased())
+                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .tracking(2)
+                Text(currentStage == .front ? "Place the front inside the guide" : "Place the back inside the guide")
+                    .foregroundStyle(.white.opacity(0.7))
+                Button {
+                    launchCamera(currentStage)
+                } label: {
+                    Label("Open camera", systemImage: "camera.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 17)
+                }
+                .buttonStyle(PrimaryActionButtonStyle())
+                .disabled(isSending)
+            }
+            .padding(.horizontal, 28)
+            Spacer()
+            if let statusMessage {
+                statusBanner(statusMessage)
+            }
+        }
+        .padding(.top, 12)
+        .onAppear {
+            if activeCameraStage == nil && !isSending {
+                launchCamera(currentStage)
+            }
+        }
+    }
+
+    private var flowHeader: some View {
+        HStack {
+            Image("ezcan_logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 38, height: 38)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("EZCAN")
+                    .font(.system(size: 15, weight: .black, design: .rounded))
+                    .tracking(1.4)
+                Text("Card capture")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            Spacer()
+            Button {
+                pairingStore.unpair()
+            } label: {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.headline)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .padding(10)
+                    .background(.white.opacity(0.1), in: Circle())
+            }
+            .accessibilityLabel("Disconnect computer")
+        }
+        .padding(.horizontal, 22)
+    }
+
+    private var optionMenu: some View {
+        VStack(spacing: 0) {
+            flowHeader
+            VStack(spacing: 10) {
+                Text("CARD MEDIA")
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .tracking(1.6)
+                Text("Add anything that helps show this card clearly.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.66))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 42)
+            Spacer()
+            VStack(spacing: 13) {
+                optionButton(title: "Additional photo", detail: "Corners, edges, holo or defects", icon: "plus.viewfinder", tint: .orange) {
+                    launchCamera(.additional)
+                }
+                optionButton(title: "Surface video", detail: "1080p HD • up to 30 seconds", icon: "video.fill", tint: .red) {
+                    launchCamera(.video)
+                }
+                optionButton(title: "Next", detail: "Choose the archive code", icon: "arrow.right.circle.fill", tint: .blue) {
+                    showingNaming = true
+                    stage = nil
+                }
+            }
+            .padding(.horizontal, 22)
+            Spacer()
+            if let statusMessage {
+                statusBanner(statusMessage)
+                    .padding(.bottom, 20)
+            }
+        }
+    }
+
+    private func optionButton(
+        title: String,
+        detail: String,
+        icon: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(tint)
+                    .frame(width: 46, height: 46)
+                    .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+            .padding(16)
+            .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(.white.opacity(0.1), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var namingView: some View {
+        VStack(spacing: 0) {
+            flowHeader
+            Spacer()
+            VStack(spacing: 20) {
+                Image(systemName: "barcode.viewfinder")
+                    .font(.system(size: 50, weight: .medium))
+                    .foregroundStyle(.blue)
+                Text("Name this card")
+                    .font(.system(size: 32, weight: .black, design: .rounded))
+                Text("Use the four-character archive code for this physical card.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .multilineTextAlignment(.center)
+                TextField("A2B4", text: $archiveCode)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .keyboardType(.asciiCapable)
+                    .font(.system(size: 32, weight: .bold, design: .monospaced))
+                    .multilineTextAlignment(.center)
+                    .padding(.vertical, 16)
+                    .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(ArchiveCodeRules.isValid(archiveCode) ? .green : .white.opacity(0.18), lineWidth: 2)
+                    }
+                    .onChange(of: archiveCode) { _, newValue in
+                        archiveCode = ArchiveCodeRules.filtered(newValue)
+                    }
+                Text("Letter • number • letter • number")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.48))
+            }
+            .padding(.horizontal, 32)
+            Spacer()
+            HStack(spacing: 12) {
+                Button {
+                    showingNaming = false
+                    stage = nil
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 56, height: 56)
+                }
+                .buttonStyle(SecondaryActionButtonStyle())
+                Button {
+                    Task { await finishCard() }
+                } label: {
+                    if isSending {
+                        ProgressView().tint(.white)
+                    } else {
+                        Label("Finish card", systemImage: "checkmark.circle.fill")
+                    }
+                }
+                .buttonStyle(PrimaryActionButtonStyle())
+                .disabled(!ArchiveCodeRules.isValid(archiveCode) || isSending)
+            }
+            .padding(.horizontal, 22)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private func completedView(code: String) -> some View {
+        VStack(spacing: 22) {
+            Image("ezcan_logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 110, height: 110)
+            Text("CARD ARCHIVED")
+                .font(.system(size: 26, weight: .black, design: .rounded))
+                .tracking(1.2)
+            Text(code)
+                .font(.system(size: 58, weight: .bold, design: .monospaced))
+                .foregroundStyle(.green)
+                .padding(.horizontal, 25)
+                .padding(.vertical, 18)
+                .background(.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 18))
+            Text("The photos and video are safely on the computer.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.65))
+                .multilineTextAlignment(.center)
+            Button {
+                resetForNextCard()
+            } label: {
+                Label("Next card", systemImage: "plus.circle.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PrimaryActionButtonStyle())
+            .padding(.horizontal, 28)
+        }
+        .padding(28)
+    }
+
+    private func statusBanner(_ message: String) -> some View {
+        Label(message, systemImage: message.contains("failed") ? "exclamationmark.triangle" : "arrow.up.circle")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(message.contains("failed") ? .orange : .white.opacity(0.72))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.black.opacity(0.28), in: Capsule())
+    }
+
+    private func prepareIntake() async {
+        guard let pairing = pairingStore.pairing else { return }
+        do {
+            let receipt = try await LocalReceiverClient(pairing: pairing).createIntake(note: nil)
+            await MainActor.run {
+                intakeID = receipt.intakeId
+                archiveCode = receipt.suggestedArchiveCode ?? ArchiveCodeRules.suggested()
+                stage = .front
+                isPreparing = false
+            }
+        } catch {
+            await MainActor.run {
+                statusMessage = "Upload failed: \(error.localizedDescription)"
+                isPreparing = false
+                stage = .front
+            }
+        }
+    }
+
+    private func launchCamera(_ cameraStage: CaptureStage) {
+        guard !isSending else { return }
+        stage = cameraStage
+        activeCameraStage = cameraStage
+    }
+
+    private func accept(_ media: CapturedMedia, for captureStage: CaptureStage) {
+        let fileName = nextFileName(for: captureStage, original: media.fileName)
+        let namedMedia = media.named(fileName)
+        capturedMedia.append(namedMedia)
+        isSending = true
+        statusMessage = "Sending \(fileName)..."
+        Task {
             do {
-                try data.write(to: url, options: .atomic)
-                let captured = CapturedMedia(
-                    fileURL: url,
-                    kind: isVideo ? .video : .image,
-                    fileName: url.lastPathComponent
-                )
+                guard let intakeID, let pairing = pairingStore.pairing else { return }
+                try await LocalReceiverClient(pairing: pairing).upload(namedMedia, to: intakeID)
                 await MainActor.run {
-                    if !media.contains(captured) {
-                        media.append(captured)
+                    isSending = false
+                    statusMessage = "Sent \(fileName)"
+                    switch captureStage {
+                    case .front:
+                        stage = .back
+                        activeCameraStage = .back
+                    case .back:
+                        stage = nil
+                    case .additional, .video:
+                        stage = nil
                     }
                 }
             } catch {
                 await MainActor.run {
-                    uploadMessage = "Could not import one of the selected files."
+                    isSending = false
+                    statusMessage = "Upload failed: \(error.localizedDescription)"
+                    activeCameraStage = captureStage
+                    stage = captureStage
                 }
             }
         }
-        await MainActor.run {
-            selectedPhotos = []
+    }
+
+    private func nextFileName(for captureStage: CaptureStage, original: String) -> String {
+        let base: String
+        let fileExtension = (original as NSString).pathExtension.isEmpty ? (captureStage == .video ? "mov" : "jpg") : (original as NSString).pathExtension
+        switch captureStage {
+        case .front: base = "front"
+        case .back: base = "back"
+        case .additional: base = "additional"
+        case .video: base = "video"
+        }
+        let count = (nameCounters[base] ?? 0) + 1
+        nameCounters[base] = count
+        return "\(base)\(count == 1 ? "" : String(count)).\(fileExtension)"
+    }
+
+    private func moveBack(from captureStage: CaptureStage) {
+        switch captureStage {
+        case .front:
+            activeCameraStage = nil
+        case .back:
+            stage = .front
+            activeCameraStage = .front
+        case .additional, .video:
+            stage = nil
+            activeCameraStage = nil
         }
     }
 
-    private func uploadIntake() async {
-        guard let pairing = pairingStore.pairing else { return }
-        isUploading = true
-        uploadMessage = nil
-        defer { isUploading = false }
-        do {
-            let client = LocalReceiverClient(pairing: pairing)
-            let receipt = try await client.createIntake(note: note.isEmpty ? nil : note)
-            for item in media {
-                try await client.upload(item, to: receipt.intakeId)
-            }
-            let archive = try await client.completeIntake(receipt.intakeId)
-            uploadMessage = "Archive code: \(archive.archiveCode)"
-        } catch {
-            uploadMessage = error.localizedDescription
+    private func advanceWithoutCapture(from captureStage: CaptureStage) {
+        switch captureStage {
+        case .front:
+            stage = .back
+            activeCameraStage = .back
+        case .back, .additional, .video:
+            stage = nil
         }
+    }
+
+    private func finishCard() async {
+        guard let intakeID, let pairing = pairingStore.pairing else { return }
+        isSending = true
+        do {
+            let archive = try await LocalReceiverClient(pairing: pairing).completeIntake(intakeID, archiveCode: archiveCode)
+            await MainActor.run {
+                completedCode = archive.archiveCode
+                isSending = false
+            }
+        } catch {
+            await MainActor.run {
+                isSending = false
+                statusMessage = "Upload failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func resetForNextCard() {
+        intakeID = nil
+        archiveCode = ""
+        stage = nil
+        activeCameraStage = nil
+        showingNaming = false
+        isPreparing = true
+        isSending = false
+        capturedMedia = []
+        nameCounters = [:]
+        statusMessage = nil
+        completedCode = nil
+        Task { await prepareIntake() }
+    }
+}
+
+private enum ArchiveCodeRules {
+    static let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    static let digits = Array("0123456789")
+
+    static func filtered(_ value: String) -> String {
+        var result = ""
+        for character in value.uppercased() where result.count < 4 {
+            let index = result.count
+            if index.isMultiple(of: 2) {
+                if letters.contains(character) { result.append(character) }
+            } else if digits.contains(character) {
+                result.append(character)
+            }
+        }
+        return result
+    }
+
+    static func isValid(_ value: String) -> Bool {
+        let characters = Array(value)
+        return characters.count == 4
+            && letters.contains(characters[0])
+            && digits.contains(characters[1])
+            && letters.contains(characters[2])
+            && digits.contains(characters[3])
+    }
+
+    static func suggested() -> String {
+        let first = letters.randomElement() ?? "A"
+        var second = letters.randomElement() ?? "B"
+        while second == first { second = letters.randomElement() ?? "B" }
+        return "\(first)\(digits.randomElement() ?? "2")\(second)\(digits.randomElement() ?? "3")"
+    }
+}
+
+private struct PrimaryActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white)
+            .background(
+                LinearGradient(colors: [.blue, Color(red: 0.12, green: 0.35, blue: 0.9)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 16)
+            )
+            .opacity(configuration.isPressed ? 0.78 : 1)
+    }
+}
+
+private struct SecondaryActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white)
+            .background(.white.opacity(configuration.isPressed ? 0.18 : 0.1), in: RoundedRectangle(cornerRadius: 16))
     }
 }
 
@@ -314,12 +685,46 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        configureScanner()
+        requestCameraAccess()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         previewLayer?.frame = view.bounds
+    }
+
+    private func requestCameraAccess() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            configureScanner()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        self?.configureScanner()
+                    } else {
+                        self?.showCameraAccessMessage()
+                    }
+                }
+            }
+        default:
+            showCameraAccessMessage()
+        }
+    }
+
+    private func showCameraAccessMessage() {
+        let label = UILabel()
+        label.text = "Camera access is required in Settings"
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            label.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            label.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
     }
 
     private func configureScanner() {

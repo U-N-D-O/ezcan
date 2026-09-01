@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import html
 import json
 import os
 import secrets
 import shutil
 import socket
 import sqlite3
+import sys
 import threading
 import uuid
-import webbrowser
+import base64
+import tkinter as tk
+from tkinter import messagebox, ttk
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -20,7 +22,7 @@ from typing import Iterator
 import qrcode
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 
 ARCHIVE_LETTERS = "ABCDEFGHJKLMNPQRTUVWXY"
@@ -57,6 +59,23 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def valid_archive_code(value: str) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 4
+        and value[0].isupper()
+        and value[0].isascii()
+        and value[0].isalpha()
+        and value[1].isascii()
+        and value[1].isdigit()
+        and value[2].isupper()
+        and value[2].isascii()
+        and value[2].isalpha()
+        and value[3].isascii()
+        and value[3].isdigit()
+    )
 
 
 class Store:
@@ -158,7 +177,7 @@ class Store:
                 (intake_id, file_name, str(file_path), media_type, file_hash, file_size, utc_now()),
             )
 
-    def finalize(self, intake_id: str) -> str:
+    def finalize(self, intake_id: str, requested_archive_code: str | None = None) -> str:
         intake = self.intake(intake_id)
         if intake is None:
             raise HTTPException(status_code=404, detail="Intake not found")
@@ -168,7 +187,18 @@ class Store:
         if not media:
             raise HTTPException(status_code=400, detail="At least one media file is required")
 
-        archive_code = self.new_archive_code()
+        archive_code = self.new_archive_code() if requested_archive_code is None else requested_archive_code
+        if requested_archive_code is not None and (not isinstance(archive_code, str) or not valid_archive_code(archive_code)):
+            raise HTTPException(
+                status_code=422,
+                detail="Archive code must match uppercase letter-digit-letter-digit format",
+            )
+        with self.connection() as connection:
+            if connection.execute(
+                "SELECT 1 FROM cards WHERE archive_code = ? OR archive_code IN (SELECT archive_code FROM intakes WHERE archive_code = ?)",
+                (archive_code, archive_code),
+            ).fetchone():
+                raise HTTPException(status_code=409, detail="Archive code is already in use")
         internal_id = str(uuid.uuid4())
         temporary_path = Path(intake["temporary_path"])
         final_path = self.cards / archive_code
@@ -238,15 +268,27 @@ class Store:
         with self.connection() as connection:
             return connection.execute("SELECT * FROM cards ORDER BY created_at DESC LIMIT 25").fetchall()
 
+    def dashboard_stats(self) -> tuple[int, int, int]:
+        with self.connection() as connection:
+            cards = connection.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
+            active_intakes = connection.execute(
+                "SELECT COUNT(*) FROM intakes WHERE status = 'uploading'"
+            ).fetchone()[0]
+            media = connection.execute("SELECT COUNT(*) FROM media").fetchone()[0]
+        return int(cards), int(active_intakes), int(media)
+
+
+def program_directory() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
 
 def default_data_root() -> Path:
     configured = os.environ.get("EZCAN_DATA_DIR")
     if configured:
         return Path(configured).expanduser().resolve()
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if local_app_data:
-        return Path(local_app_data) / "Ezcan"
-    return Path.home() / "Ezcan"
+    return program_directory() / "Archive"
 
 
 def create_app(data_root: Path | None = None) -> FastAPI:
@@ -307,7 +349,7 @@ def create_app(data_root: Path | None = None) -> FastAPI:
         except json.JSONDecodeError:
             body = {}
         intake_id, _ = store.create_intake(body.get("note"))
-        return JSONResponse({"intakeId": intake_id})
+        return JSONResponse({"intakeId": intake_id, "suggestedArchiveCode": store.new_archive_code()})
 
     @app.post("/api/intakes/{intake_id}/media")
     async def upload_media(intake_id: str, request: Request) -> JSONResponse:
@@ -371,40 +413,301 @@ def create_app(data_root: Path | None = None) -> FastAPI:
     @app.post("/api/intakes/{intake_id}/complete")
     async def complete_intake(intake_id: str, request: Request) -> dict[str, str]:
         require_token(request)
-        return {"archiveCode": store.finalize(intake_id)}
-
-    @app.get("/", response_class=HTMLResponse)
-    async def dashboard() -> str:
-        cards = store.recent_cards()
-        card_rows = "".join(
-            f"<tr><td><strong>{html.escape(card['archive_code'])}</strong></td>"
-            f"<td>{html.escape(card['status'])}</td><td>{html.escape(card['folder_path'])}</td></tr>"
-            for card in cards
-        )
-        payload = html.escape(json.dumps(pairing_payload(Request(scope={"type": "http", "headers": []}))))
-        return f"""<!doctype html>
-<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Ezcan Computer</title>
-<style>body{{font-family:Segoe UI,system-ui,sans-serif;max-width:1000px;margin:0 auto;padding:32px;color:#202124;background:#f5f7f8}}main{{background:white;padding:28px;border-radius:12px;box-shadow:0 3px 14px #0001}}h1{{margin-top:0}}.grid{{display:grid;grid-template-columns:220px 1fr;gap:24px;align-items:center}}img{{width:200px;height:200px;border:1px solid #ddd}}code{{word-break:break-all}}table{{border-collapse:collapse;width:100%;margin-top:18px}}td,th{{border-bottom:1px solid #ddd;text-align:left;padding:10px 6px}}.muted{{color:#5f6368}}</style></head>
-<body><main><h1>Ezcan Computer</h1><p class=\"muted\">Receive card media from the paired iPhone over your private Wi-Fi network.</p>
-<div class=\"grid\"><img src=\"/pairing/qr\" alt=\"Pairing QR code\"><div><h2>Pair this computer</h2><p>Scan this code in the Ezcan iOS app.</p><p><strong>Address</strong><br><code id=\"address\"></code></p><p><strong>Pairing payload</strong><br><code>{payload}</code></p></div></div>
-<h2>Archived cards</h2><table><thead><tr><th>Archive code</th><th>Status</th><th>Folder</th></tr></thead><tbody>{card_rows or '<tr><td colspan=\"3\" class=\"muted\">No cards received yet.</td></tr>'}</tbody></table>
-<script>fetch('/api/pairing').then(r=>r.json()).then(p=>document.getElementById('address').textContent=p.url)</script></main></body></html>"""
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        return {"archiveCode": store.finalize(intake_id, body.get("archiveCode"))}
 
     return app
 
 
+class DesktopWindow:
+    background = "#0b1020"
+    panel = "#121a2b"
+    panel_alt = "#18233a"
+    border = "#263653"
+    text = "#f4f7fb"
+    muted = "#91a0b9"
+    blue = "#4f8cff"
+    green = "#43d39e"
+
+    def __init__(self, application: FastAPI, server: uvicorn.Server):
+        self.application = application
+        self.server = server
+        self.store: Store = application.state.store
+        self.root = tk.Tk()
+        self.root.title("Ezcan Computer")
+        self.root.geometry("1180x780")
+        self.root.minsize(940, 650)
+        self.root.configure(bg=self.background)
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.address = f"http://{computer_ip()}:{application.state.port}"
+        self.address_var = tk.StringVar(value=self.address)
+        self.connection_var = tk.StringVar(value="ONLINE  •  PRIVATE NETWORK")
+        self.archive_var = tk.StringVar(value=str(self.store.root))
+        self.cards_var = tk.StringVar(value="0")
+        self.active_var = tk.StringVar(value="0")
+        self.media_var = tk.StringVar(value="0")
+        self.updated_var = tk.StringVar(value="Waiting for activity")
+        self.qr_photo: tk.PhotoImage | None = None
+        self.tree: ttk.Treeview
+        self.build_styles()
+        self.build_layout()
+        self.refresh()
+
+    def build_styles(self) -> None:
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure(
+            "Ezcan.Treeview",
+            background=self.panel,
+            fieldbackground=self.panel,
+            foreground=self.text,
+            borderwidth=0,
+            rowheight=42,
+            font=("Segoe UI", 10),
+        )
+        style.configure(
+            "Ezcan.Treeview.Heading",
+            background=self.panel_alt,
+            foreground=self.muted,
+            borderwidth=0,
+            font=("Segoe UI Semibold", 9),
+        )
+        style.map("Ezcan.Treeview", background=[("selected", "#25477d")], foreground=[("selected", self.text)])
+
+    def build_layout(self) -> None:
+        header = tk.Frame(self.root, bg=self.background)
+        header.pack(fill="x", padx=34, pady=(28, 18))
+
+        brand = tk.Frame(header, bg=self.background)
+        brand.pack(side="left")
+        tk.Label(
+            brand,
+            text="EZCAN",
+            bg=self.background,
+            fg=self.text,
+            font=("Segoe UI Black", 27),
+        ).pack(anchor="w")
+        tk.Label(
+            brand,
+            text="CARD OPERATIONS CONSOLE",
+            bg=self.background,
+            fg=self.blue,
+            font=("Segoe UI Semibold", 9),
+        ).pack(anchor="w")
+
+        status = tk.Label(
+            header,
+            textvariable=self.connection_var,
+            bg="#12382f",
+            fg=self.green,
+            padx=14,
+            pady=8,
+            font=("Segoe UI Semibold", 9),
+        )
+        status.pack(side="right", anchor="n", pady=5)
+
+        body = tk.Frame(self.root, bg=self.background)
+        body.pack(fill="both", expand=True, padx=34, pady=(0, 24))
+        body.grid_columnconfigure(0, weight=0, minsize=330)
+        body.grid_columnconfigure(1, weight=1)
+        body.grid_rowconfigure(0, weight=1)
+
+        self.build_pairing_panel(body).grid(row=0, column=0, sticky="nsew", padx=(0, 22))
+        right = tk.Frame(body, bg=self.background)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(2, weight=1)
+        self.build_stats(right).grid(row=0, column=0, sticky="ew")
+        self.build_archive_bar(right).grid(row=1, column=0, sticky="ew", pady=(22, 14))
+        self.build_cards_table(right).grid(row=2, column=0, sticky="nsew")
+
+    def build_pairing_panel(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        tk.Label(
+            frame,
+            text="PAIR DEVICE",
+            bg=self.panel,
+            fg=self.text,
+            font=("Segoe UI Semibold", 13),
+        ).pack(anchor="w", padx=24, pady=(24, 3))
+        tk.Label(
+            frame,
+            text="Scan this code in the Ezcan iOS app",
+            bg=self.panel,
+            fg=self.muted,
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", padx=24)
+
+        qr_frame = tk.Frame(frame, bg="#ffffff", width=240, height=240)
+        qr_frame.pack(padx=24, pady=22)
+        qr_frame.pack_propagate(False)
+        payload = json.dumps(
+            {
+                "protocol": "ezcan",
+                "version": 1,
+                "url": self.address,
+                "token": self.application.state.token,
+                "computerName": socket.gethostname(),
+            },
+            separators=(",", ":"),
+        )
+        image = qrcode.make(payload)
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        self.qr_photo = tk.PhotoImage(data=base64.b64encode(buffer.getvalue()).decode("ascii"))
+        tk.Label(qr_frame, image=self.qr_photo, bg="#ffffff").place(relx=0.5, rely=0.5, anchor="center")
+
+        tk.Label(
+            frame,
+            text="COMPUTER ADDRESS",
+            bg=self.panel,
+            fg=self.muted,
+            font=("Segoe UI Semibold", 8),
+        ).pack(anchor="w", padx=24)
+        address_label = tk.Label(
+            frame,
+            textvariable=self.address_var,
+            bg=self.panel,
+            fg=self.text,
+            font=("Consolas", 10),
+            cursor="hand2",
+        )
+        address_label.pack(anchor="w", padx=24, pady=(4, 12))
+        address_label.bind("<Button-1>", lambda _event: self.copy_text(self.address))
+
+        tk.Button(
+            frame,
+            text="Copy address",
+            command=lambda: self.copy_text(self.address),
+            bg=self.panel_alt,
+            fg=self.text,
+            activebackground=self.border,
+            activeforeground=self.text,
+            relief="flat",
+            borderwidth=0,
+            padx=14,
+            pady=9,
+            font=("Segoe UI Semibold", 9),
+            cursor="hand2",
+        ).pack(anchor="w", padx=24, pady=(0, 24))
+        return frame
+
+    def build_stats(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=self.background)
+        for column in range(3):
+            frame.grid_columnconfigure(column, weight=1)
+        self.stat_card(frame, "ARCHIVED CARDS", self.cards_var, self.blue, 0)
+        self.stat_card(frame, "ACTIVE INTAKES", self.active_var, "#f2b84b", 1)
+        self.stat_card(frame, "MEDIA RECEIVED", self.media_var, self.green, 2)
+        return frame
+
+    def stat_card(self, parent: tk.Misc, label: str, value: tk.StringVar, accent: str, column: int) -> None:
+        card = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        card.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 8, 8 if column < 2 else 0))
+        tk.Frame(card, bg=accent, height=3).pack(fill="x")
+        tk.Label(card, text=label, bg=self.panel, fg=self.muted, font=("Segoe UI Semibold", 8)).pack(
+            anchor="w", padx=16, pady=(15, 3)
+        )
+        tk.Label(card, textvariable=value, bg=self.panel, fg=self.text, font=("Segoe UI Black", 25)).pack(
+            anchor="w", padx=16, pady=(0, 14)
+        )
+
+    def build_archive_bar(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        left = tk.Frame(frame, bg=self.panel)
+        left.pack(side="left", fill="x", expand=True, padx=18, pady=13)
+        tk.Label(left, text="ARCHIVE LOCATION", bg=self.panel, fg=self.muted, font=("Segoe UI Semibold", 8)).pack(anchor="w")
+        tk.Label(left, textvariable=self.archive_var, bg=self.panel, fg=self.text, font=("Consolas", 9)).pack(anchor="w", pady=(3, 0))
+        tk.Button(
+            frame,
+            text="Open Archive",
+            command=self.open_archive,
+            bg=self.blue,
+            fg="white",
+            activebackground="#6ea3ff",
+            activeforeground="white",
+            relief="flat",
+            borderwidth=0,
+            padx=15,
+            pady=9,
+            font=("Segoe UI Semibold", 9),
+            cursor="hand2",
+        ).pack(side="right", padx=14, pady=12)
+        return frame
+
+    def build_cards_table(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        heading = tk.Frame(frame, bg=self.panel)
+        heading.pack(fill="x", padx=20, pady=(18, 10))
+        tk.Label(heading, text="RECENT ARCHIVE ACTIVITY", bg=self.panel, fg=self.text, font=("Segoe UI Semibold", 13)).pack(side="left")
+        tk.Label(heading, textvariable=self.updated_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(side="right")
+        table_frame = tk.Frame(frame, bg=self.panel)
+        table_frame.pack(fill="both", expand=True, padx=14, pady=(0, 14))
+        self.tree = ttk.Treeview(
+            table_frame,
+            columns=("code", "status", "folder", "created"),
+            show="headings",
+            style="Ezcan.Treeview",
+        )
+        headings = {"code": "ARCHIVE CODE", "status": "STATUS", "folder": "FOLDER", "created": "RECEIVED"}
+        widths = {"code": 130, "status": 120, "folder": 300, "created": 150}
+        for column, title in headings.items():
+            self.tree.heading(column, text=title, anchor="w")
+            self.tree.column(column, width=widths[column], anchor="w", stretch=column in {"folder", "created"})
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        return frame
+
+    def refresh(self) -> None:
+        cards, active_intakes, media = self.store.dashboard_stats()
+        self.cards_var.set(str(cards))
+        self.active_var.set(str(active_intakes))
+        self.media_var.set(str(media))
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for card in self.store.recent_cards():
+            created = str(card["created_at"]).replace("T", " ")[:19]
+            self.tree.insert(
+                "",
+                "end",
+                values=(card["archive_code"], str(card["status"]).upper(), card["folder_path"], created),
+            )
+        self.updated_var.set(f"Updated {datetime.now().strftime('%H:%M:%S')}")
+        self.root.after(1500, self.refresh)
+
+    def copy_text(self, value: str) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(value)
+        self.connection_var.set("ADDRESS COPIED  •  PRIVATE NETWORK")
+        self.root.after(2200, lambda: self.connection_var.set("ONLINE  •  PRIVATE NETWORK"))
+
+    def open_archive(self) -> None:
+        try:
+            if not hasattr(os, "startfile"):
+                raise OSError("Opening the archive folder is supported on Windows only")
+            os.startfile(str(self.store.root))
+        except OSError as error:
+            messagebox.showerror("Ezcan Archive", f"Could not open the archive folder.\n\n{error}")
+
+    def close(self) -> None:
+        self.server.should_exit = True
+        self.root.destroy()
+
+    def run(self) -> None:
+        self.root.mainloop()
+
+
 def start() -> None:
-    port = int(os.environ.get("EZCAN_PORT", "8765"))
     app = create_app()
-    url = f"http://{computer_ip()}:{port}"
-    print(f"Ezcan Computer is running at {url}")
-    print(f"Data folder: {app.state.store.root}")
-    if os.environ.get("EZCAN_NO_BROWSER") != "1":
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
-
-
-app = create_app()
+    config = uvicorn.Config(app, host="0.0.0.0", port=app.state.port, log_level="warning", access_log=False)
+    server = uvicorn.Server(config)
+    threading.Thread(target=server.run, daemon=True, name="ezcan-api").start()
+    DesktopWindow(app, server).run()
 
 if __name__ == "__main__":
     start()

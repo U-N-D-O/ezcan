@@ -24,6 +24,7 @@ def run_build() -> int:
         "--clean",
         "--noconfirm",
         "--onefile",
+        "--windowed",
         "--name",
         "EzcanComputer",
         "--distpath",

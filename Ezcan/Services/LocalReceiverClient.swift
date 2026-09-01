@@ -18,10 +18,15 @@ struct CapturedMedia: Identifiable, Equatable {
         self.kind = kind
         self.fileName = fileName
     }
+
+    func named(_ fileName: String) -> CapturedMedia {
+        CapturedMedia(id: id, fileURL: fileURL, kind: kind, fileName: fileName)
+    }
 }
 
 struct IntakeReceipt: Decodable {
     let intakeId: String
+    let suggestedArchiveCode: String?
 }
 
 struct ArchiveReceipt: Decodable {
@@ -56,12 +61,18 @@ struct LocalReceiverClient {
     }
 
     func completeIntake(_ intakeId: String) async throws -> ArchiveReceipt {
+        try await completeIntake(intakeId, archiveCode: nil)
+    }
+
+    func completeIntake(_ intakeId: String, archiveCode: String) async throws -> ArchiveReceipt {
         let request = try makeRequest(
             path: "api/intakes/\(intakeId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? intakeId)/complete",
             method: "POST",
             contentType: "application/json"
         )
-        let (data, response) = try await URLSession.shared.upload(for: request, from: Data("{}".utf8))
+        let payload = ["archiveCode": archiveCode]
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.upload(for: request, from: body)
         try validate(response)
         return try JSONDecoder().decode(ArchiveReceipt.self, from: data)
     }

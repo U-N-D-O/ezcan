@@ -1,4 +1,4 @@
-name: Build Ezcan iOS
+name: Build Ezcan iOS IPA
 
 on:
   push:
@@ -7,48 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: macos-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
-      - name: Generate Xcode project
-        run: xcodegen generate
-
-      - name: Build simulator app
-        run: >-
-          xcodebuild
-          -project Ezcan.xcodeproj
-          -scheme Ezcan
-          -sdk iphonesimulator
-          -configuration Debug
-          -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath build
-          CODE_SIGNING_ALLOWED=NO
-          build
-
-      - name: Package simulator app
-        run: >-
-          ditto
-          -c
-          -k
-          --sequesterRsrc
-          --keepParent
-          build/Build/Products/Debug-iphonesimulator/Ezcan.app
-          Ezcan-simulator.app.zip
-
-      - name: Upload simulator app
-        uses: actions/upload-artifact@v4
-        with:
-          name: ezcan-ios-simulator-app
-          path: Ezcan-simulator.app.zip
-
-  unsigned-ipa:
-    needs: build
+  build-ipa:
     runs-on: macos-latest
     steps:
       - name: Check out repository
@@ -79,8 +38,10 @@ jobs:
           cp -R device-build/Build/Products/Release-iphoneos/Ezcan.app "$RUNNER_TEMP/ezcan-ipa/Payload/"
           ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/ezcan-ipa/Payload" Ezcan-unsigned.ipa
 
-      - name: Upload unsigned IPA
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ezcan-unsigned-ipa
+          name: ezcan-ios-ipa
           path: Ezcan-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30

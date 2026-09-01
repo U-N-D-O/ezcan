@@ -34,15 +34,13 @@ The project targets iOS 17 or newer and uses the bundle identifier `com.undu.ezc
 
 ## GitHub Actions
 
-The workflow at `.github/workflows/build-ios.yml` always builds an unsigned simulator app and uploads it as the `ezcan-ios-simulator-app` artifact (`Ezcan-simulator.app.zip`). This artifact is for simulator testing and is not installable on a physical iPhone.
-
-The workflow also builds an unsigned device app and uploads it as the `ezcan-unsigned-ipa` artifact (`Ezcan-unsigned.ipa`). Download that artifact and import it into AltStore or use AltServer to re-sign it with your Apple ID before installing it on an iPhone. The IPA is intentionally unsigned at build time.
+The workflow at `.github/workflows/build-ios.yml` builds the unsigned device IPA on every push to `main`, every pull request, and manual workflow dispatch. It uploads the result as the `ezcan-ios-ipa` artifact (`Ezcan-unsigned.ipa`). Download that artifact and import it into AltStore or use AltServer to re-sign it with your Apple ID before installing it on an iPhone. The IPA is intentionally unsigned at build time.
 
 The unsigned IPA is not directly installable by iOS until AltStore or AltServer signs it. A future distribution workflow can add Apple Developer signing, but no signing secrets are needed for the current AltServer workflow. Never commit certificates, profiles, private keys, or passwords.
 
-## Computer API Contract
+## iPhone-to-computer connection
 
-The iOS app expects the companion computer program to provide:
+The desktop program quietly provides the private connection the iOS app uses to send card media. It does not open a browser. The connection handles:
 
 ```text
 POST /api/intakes
@@ -79,7 +77,8 @@ The computer receiver currently supports:
 - Random archive codes such as `K4M7`.
 - Permanent card folders named with the archive code.
 - SQLite records and JSON manifests.
-- A local dashboard for pairing and received cards.
+- A native desktop console with QR pairing, live intake statistics, and recent-card activity.
+- An `Archive` folder beside the running program, with each card stored under `Archive\Cards\<archiveCode>`.
 
 Run it from source with Windows PowerShell:
 
@@ -90,12 +89,12 @@ python -m pip install -r computer\requirements.txt
 python computer\ezcan_computer.py
 ```
 
-The program opens a dashboard at `http://localhost:8765`. The phone and computer must be on the same private Wi-Fi network. Data is stored in `%LOCALAPPDATA%\Ezcan` by default.
+The program opens its own desktop window and quietly keeps the private phone connection running in the background. The phone and computer must be on the same private Wi-Fi network. By default, data is stored beside the running program in `Archive\` and each card gets its own folder under `Archive\Cards\`. Set `EZCAN_DATA_DIR` to override this location.
 
 Build the executable locally:
 
 ```powershell
-python -m PyInstaller --clean --noconfirm --onefile --name EzcanComputer computer\ezcan_computer.py
+python -m PyInstaller --clean --noconfirm --onefile --windowed --name EzcanComputer computer\ezcan_computer.py
 ```
 
-The Windows workflow at `.github/workflows/build-windows.yml` runs the tests and publishes `EzcanComputer.exe` as a GitHub Actions artifact for each push and pull request. eBay Picture Search, market research, and listing-draft screens are the next computer-program phase.
+Build `EzcanComputer.exe` locally on the Windows computer with the command above. eBay Picture Search, market research, and listing-draft screens are the next computer-program phase.
