@@ -1,0 +1,27 @@
+name: Ezcan
+options:
+  bundleIdPrefix: com.undu
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+targets:
+  Ezcan:
+    type: application
+    platform: iOS
+    sources:
+      - path: Ezcan
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.undu.ezcan
+        INFOPLIST_KEY_NSCameraUsageDescription: "Ezcan uses the camera to photograph Pokemon cards."
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Ezcan uses the microphone when recording card videos."
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Ezcan uses your photo library to send card media to your computer."
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Ezcan connects to your computer over your private Wi-Fi network."
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+    scheme:
+      gatherCoverageData: false
+      testTargets: []
