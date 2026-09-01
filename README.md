@@ -79,6 +79,7 @@ The computer receiver currently supports:
 - SQLite records and JSON manifests.
 - A native desktop console with QR pairing, live intake statistics, and recent-card activity.
 - An `Archive` folder beside the running program, with each card stored under `Archive\Cards\<archiveCode>`.
+- A `Send to iPhone` file shelf for downloaded IPA files and other files you want to share to the paired phone.
 
 Run it from source with Windows PowerShell:
 
@@ -90,6 +91,8 @@ python computer\ezcan_computer.py
 ```
 
 The program opens its own desktop window and quietly keeps the private phone connection running in the background. The phone and computer must be on the same private Wi-Fi network. By default, data is stored beside the running program in `Archive\` and each card gets its own folder under `Archive\Cards\`. Set `EZCAN_DATA_DIR` to override this location.
+
+To transfer the IPA without email, download the GitHub Actions artifact on the computer, open Ezcan Computer, choose `Choose file` under `Send to iPhone`, and select `Ezcan-unsigned.ipa`. In the paired iOS app, open `Files from computer`, download the IPA, then choose AltStore in the iOS share sheet. AltStore still performs the required signing and installation.
 
 Build the executable locally:
 

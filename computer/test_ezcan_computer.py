@@ -153,3 +153,22 @@ def test_duplicate_archive_code_is_rejected(tmp_path: Path) -> None:
         json={"archiveCode": "A1B2"},
     )
     assert duplicate.status_code == 409
+
+
+def test_shared_file_can_be_listed_and_downloaded(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "data")
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.token}"}
+    content = b"ipa-artifact-content"
+    shared_file = app.state.store.to_iphone / "Ezcan-unsigned.ipa"
+    shared_file.write_bytes(content)
+
+    listing = client.get("/api/shared-files", headers=headers)
+    download = client.get("/api/shared-files/Ezcan-unsigned.ipa", headers=headers)
+
+    assert listing.status_code == 200
+    assert listing.json()["files"][0]["fileName"] == "Ezcan-unsigned.ipa"
+    assert listing.json()["files"][0]["size"] == len(content)
+    assert download.status_code == 200
+    assert download.headers["content-disposition"].endswith('filename="Ezcan-unsigned.ipa"')
+    assert download.content == content

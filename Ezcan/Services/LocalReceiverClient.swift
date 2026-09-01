@@ -33,6 +33,14 @@ struct ArchiveReceipt: Decodable {
     let archiveCode: String
 }
 
+struct SharedFile: Decodable, Identifiable, Equatable {
+    let fileName: String
+    let size: Int
+    let modifiedAt: String
+
+    var id: String { fileName }
+}
+
 struct LocalReceiverClient {
     let pairing: PairingCode
 
@@ -75,6 +83,30 @@ struct LocalReceiverClient {
         let (data, response) = try await URLSession.shared.upload(for: request, from: body)
         try validate(response)
         return try JSONDecoder().decode(ArchiveReceipt.self, from: data)
+    }
+
+    func listSharedFiles() async throws -> [SharedFile] {
+        let request = try makeRequest(path: "api/shared-files", method: "GET", contentType: "application/json")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response)
+        let envelope = try JSONDecoder().decode(SharedFileEnvelope.self, from: data)
+        return envelope.files
+    }
+
+    func downloadSharedFile(_ file: SharedFile) async throws -> URL {
+        let encodedName = file.fileName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file.fileName
+        let request = try makeRequest(path: "api/shared-files/\(encodedName)", method: "GET", contentType: "application/octet-stream")
+        let (temporaryURL, response) = try await URLSession.shared.download(for: request)
+        try validate(response)
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Ezcan-\(file.fileName)")
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: temporaryURL, to: destination)
+        return destination
+    }
+
+    private struct SharedFileEnvelope: Decodable {
+        let files: [SharedFile]
     }
 
     private func makeRequest(path: String, method: String, contentType: String) throws -> URLRequest {

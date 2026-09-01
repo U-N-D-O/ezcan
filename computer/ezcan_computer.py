@@ -13,7 +13,7 @@ import threading
 import uuid
 import base64
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -22,13 +22,14 @@ from typing import Iterator
 import qrcode
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 
 ARCHIVE_LETTERS = "ABCDEFGHJKLMNPQRTUVWXY"
 ARCHIVE_DIGITS = "2346789"
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
 MAX_VIDEO_BYTES = 300 * 1024 * 1024
+MAX_SHARED_FILE_BYTES = 1024 * 1024 * 1024
 
 
 def utc_now() -> str:
@@ -83,10 +84,11 @@ class Store:
         self.root = root
         self.incoming = root / "Incoming"
         self.cards = root / "Cards"
+        self.to_iphone = root / "To iPhone"
         self.backups = root / "Backups"
         self.logs = root / "Logs"
         self.database_path = root / "ezcan.sqlite3"
-        for folder in (self.incoming, self.cards, self.backups, self.logs):
+        for folder in (self.incoming, self.cards, self.to_iphone, self.backups, self.logs):
             folder.mkdir(parents=True, exist_ok=True)
         self._initialize_database()
 
@@ -268,6 +270,40 @@ class Store:
         with self.connection() as connection:
             return connection.execute("SELECT * FROM cards ORDER BY created_at DESC LIMIT 25").fetchall()
 
+    def shared_files(self) -> list[dict[str, object]]:
+        files = []
+        for path in sorted(self.to_iphone.iterdir(), key=lambda item: item.stat().st_mtime, reverse=True):
+            if path.is_file():
+                stat = path.stat()
+                files.append(
+                    {
+                        "fileName": path.name,
+                        "size": stat.st_size,
+                        "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                    }
+                )
+        return files
+
+    def shared_file(self, file_name: str) -> Path | None:
+        if safe_file_name(file_name) != file_name:
+            return None
+        path = self.to_iphone / file_name
+        return path if path.is_file() else None
+
+    def add_shared_file(self, source: Path) -> Path:
+        if not source.is_file():
+            raise ValueError("The selected file no longer exists")
+        if source.stat().st_size > MAX_SHARED_FILE_BYTES:
+            raise ValueError("The selected file is larger than 1 GB")
+        file_name = safe_file_name(source.name)
+        destination = self.to_iphone / file_name
+        counter = 2
+        while destination.exists():
+            destination = self.to_iphone / f"{source.stem}_{counter}{source.suffix}"
+            counter += 1
+        shutil.copy2(source, destination)
+        return destination
+
     def dashboard_stats(self) -> tuple[int, int, int]:
         with self.connection() as connection:
             cards = connection.execute("SELECT COUNT(*) FROM cards").fetchone()[0]
@@ -340,6 +376,19 @@ def create_app(data_root: Path | None = None) -> FastAPI:
         if body.get("token") != app.state.token:
             raise HTTPException(status_code=401, detail="Invalid pairing token")
         return {"paired": True, "computerName": socket.gethostname()}
+
+    @app.get("/api/shared-files")
+    async def shared_files(request: Request) -> dict[str, list[dict[str, object]]]:
+        require_token(request)
+        return {"files": store.shared_files()}
+
+    @app.get("/api/shared-files/{file_name}")
+    async def download_shared_file(file_name: str, request: Request) -> FileResponse:
+        require_token(request)
+        path = store.shared_file(file_name)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Shared file not found")
+        return FileResponse(path, media_type="application/octet-stream", filename=path.name)
 
     @app.post("/api/intakes")
     async def create_intake(request: Request) -> JSONResponse:
@@ -446,6 +495,7 @@ class DesktopWindow:
         self.address_var = tk.StringVar(value=self.address)
         self.connection_var = tk.StringVar(value="ONLINE  •  PRIVATE NETWORK")
         self.archive_var = tk.StringVar(value=str(self.store.root))
+        self.transfer_var = tk.StringVar(value="No files queued")
         self.cards_var = tk.StringVar(value="0")
         self.active_var = tk.StringVar(value="0")
         self.media_var = tk.StringVar(value="0")
@@ -519,10 +569,11 @@ class DesktopWindow:
         right = tk.Frame(body, bg=self.background)
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(2, weight=1)
+        right.grid_rowconfigure(3, weight=1)
         self.build_stats(right).grid(row=0, column=0, sticky="ew")
         self.build_archive_bar(right).grid(row=1, column=0, sticky="ew", pady=(22, 14))
-        self.build_cards_table(right).grid(row=2, column=0, sticky="nsew")
+        self.build_transfer_bar(right).grid(row=2, column=0, sticky="ew", pady=(0, 14))
+        self.build_cards_table(right).grid(row=3, column=0, sticky="nsew")
 
     def build_pairing_panel(self, parent: tk.Misc) -> tk.Frame:
         frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
@@ -638,6 +689,29 @@ class DesktopWindow:
         ).pack(side="right", padx=14, pady=12)
         return frame
 
+    def build_transfer_bar(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        left = tk.Frame(frame, bg=self.panel)
+        left.pack(side="left", fill="x", expand=True, padx=18, pady=13)
+        tk.Label(left, text="SEND TO IPHONE", bg=self.panel, fg=self.muted, font=("Segoe UI Semibold", 8)).pack(anchor="w")
+        tk.Label(left, textvariable=self.transfer_var, bg=self.panel, fg=self.text, font=("Segoe UI", 9)).pack(anchor="w", pady=(3, 0))
+        tk.Button(
+            frame,
+            text="Choose file",
+            command=self.choose_file_for_iphone,
+            bg="#c95775",
+            fg="white",
+            activebackground="#e27791",
+            activeforeground="white",
+            relief="flat",
+            borderwidth=0,
+            padx=15,
+            pady=9,
+            font=("Segoe UI Semibold", 9),
+            cursor="hand2",
+        ).pack(side="right", padx=14, pady=12)
+        return frame
+
     def build_cards_table(self, parent: tk.Misc) -> tk.Frame:
         frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
         heading = tk.Frame(frame, bg=self.panel)
@@ -668,6 +742,8 @@ class DesktopWindow:
         self.cards_var.set(str(cards))
         self.active_var.set(str(active_intakes))
         self.media_var.set(str(media))
+        shared = self.store.shared_files()
+        self.transfer_var.set(f"{len(shared)} file{'s' if len(shared) != 1 else ''} ready in To iPhone")
         for item in self.tree.get_children():
             self.tree.delete(item)
         for card in self.store.recent_cards():
@@ -679,6 +755,22 @@ class DesktopWindow:
             )
         self.updated_var.set(f"Updated {datetime.now().strftime('%H:%M:%S')}")
         self.root.after(1500, self.refresh)
+
+    def choose_file_for_iphone(self) -> None:
+        source = filedialog.askopenfilename(
+            title="Choose a file to send to iPhone",
+            filetypes=[
+                ("iPhone files", "*.ipa *.zip *.pdf *.jpg *.jpeg *.png *.mov"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not source:
+            return
+        try:
+            destination = self.store.add_shared_file(Path(source))
+            self.transfer_var.set(f"Ready to download: {destination.name}")
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Send to iPhone", f"Could not queue that file.\n\n{error}")
 
     def copy_text(self, value: str) -> None:
         self.root.clipboard_clear()
@@ -704,7 +796,14 @@ class DesktopWindow:
 
 def start() -> None:
     app = create_app()
-    config = uvicorn.Config(app, host="0.0.0.0", port=app.state.port, log_level="warning", access_log=False)
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=app.state.port,
+        log_level="warning",
+        access_log=False,
+        log_config=None,
+    )
     server = uvicorn.Server(config)
     threading.Thread(target=server.run, daemon=True, name="ezcan-api").start()
     DesktopWindow(app, server).run()
