@@ -34,18 +34,9 @@ The project targets iOS 17 or newer and uses the bundle identifier `com.undu.ezc
 
 The workflow at `.github/workflows/build-ios.yml` always builds an unsigned simulator app and uploads it as the `ezcan-ios-simulator-app` artifact (`Ezcan-simulator.app.zip`). This artifact is for simulator testing and is not installable on a physical iPhone.
 
-It can also create a signed, installable IPA when the `ios-release` environment is configured and the repository variable `IOS_SIGNING_ENABLED` is set to `true`. The `signed-ipa` job is intentionally skipped until those signing requirements are configured; a valid device IPA cannot be produced without Apple code signing.
+The workflow also builds an unsigned device app and uploads it as the `ezcan-unsigned-ipa` artifact (`Ezcan-unsigned.ipa`). Download that artifact and import it into AltStore or use AltServer to re-sign it with your Apple ID before installing it on an iPhone. The IPA is intentionally unsigned at build time.
 
-Signed IPA configuration requires:
-
-- `IOS_CERTIFICATE_BASE64`
-- `IOS_CERTIFICATE_PASSWORD`
-- `IOS_PROVISIONING_PROFILE_BASE64`
-- `KEYCHAIN_PASSWORD`
-- `IOS_TEAM_ID`
-- `IOS_BUNDLE_IDENTIFIER`
-
-The provisioning profile must use the app's bundle identifier. Never commit certificates, profiles, private keys, or passwords.
+The unsigned IPA is not directly installable by iOS until AltStore or AltServer signs it. A future distribution workflow can add Apple Developer signing, but no signing secrets are needed for the current AltServer workflow. Never commit certificates, profiles, private keys, or passwords.
 
 ## Computer API Contract
 
