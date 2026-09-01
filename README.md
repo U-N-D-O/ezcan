@@ -32,7 +32,9 @@ The project targets iOS 17 or newer and uses the bundle identifier `com.undu.ezc
 
 ## GitHub Actions
 
-The workflow at `.github/workflows/build-ios.yml` always builds an unsigned simulator app. It can also create a signed IPA when the `ios-release` environment is configured and the repository variable `IOS_SIGNING_ENABLED` is set to `true`.
+The workflow at `.github/workflows/build-ios.yml` always builds an unsigned simulator app and uploads it as the `ezcan-ios-simulator-app` artifact (`Ezcan-simulator.app.zip`). This artifact is for simulator testing and is not installable on a physical iPhone.
+
+It can also create a signed, installable IPA when the `ios-release` environment is configured and the repository variable `IOS_SIGNING_ENABLED` is set to `true`. The `signed-ipa` job is intentionally skipped until those signing requirements are configured; a valid device IPA cannot be produced without Apple code signing.
 
 Signed IPA configuration requires:
 

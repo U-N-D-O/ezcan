@@ -27,14 +27,25 @@ jobs:
           -sdk iphonesimulator
           -configuration Debug
           -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath build
           CODE_SIGNING_ALLOWED=NO
           build
 
-      - name: Archive source project
+      - name: Package simulator app
+        run: >-
+          ditto
+          -c
+          -k
+          --sequesterRsrc
+          --keepParent
+          build/Build/Products/Debug-iphonesimulator/Ezcan.app
+          Ezcan-simulator.app.zip
+
+      - name: Upload simulator app
         uses: actions/upload-artifact@v4
         with:
-          name: ezcan-ios-source-build
-          path: build/
+          name: ezcan-ios-simulator-app
+          path: Ezcan-simulator.app.zip
 
   signed-ipa:
     if: ${{ github.event_name == 'workflow_dispatch' && vars.IOS_SIGNING_ENABLED == 'true' }}
