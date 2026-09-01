@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 struct CapturedMedia: Identifiable, Equatable {
-    enum Kind: String {
+    enum Kind: String, Equatable {
         case image
         case video
     }
