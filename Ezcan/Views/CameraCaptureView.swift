@@ -14,8 +14,6 @@ struct GuidedCameraView: UIViewControllerRepresentable {
     let onPhoto: (CapturedMedia) -> Void
     let onVideo: (CapturedMedia) -> Void
     let onBack: () -> Void
-    let onNext: () -> Void
-    let onCancel: () -> Void
 
     func makeUIViewController(context: Context) -> GuidedCameraController {
         GuidedCameraController(
@@ -23,9 +21,7 @@ struct GuidedCameraView: UIViewControllerRepresentable {
             mode: mode,
             onPhoto: onPhoto,
             onVideo: onVideo,
-            onBack: onBack,
-            onNext: onNext,
-            onCancel: onCancel
+            onBack: onBack
         )
     }
 
@@ -44,8 +40,6 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private let onPhoto: (CapturedMedia) -> Void
     private let onVideo: (CapturedMedia) -> Void
     private let onBack: () -> Void
-    private let onNext: () -> Void
-    private let onCancel: () -> Void
 
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "com.undu.ezcan.camera-session")
@@ -84,17 +78,13 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         mode: GuidedCameraView.Mode,
         onPhoto: @escaping (CapturedMedia) -> Void,
         onVideo: @escaping (CapturedMedia) -> Void,
-        onBack: @escaping () -> Void,
-        onNext: @escaping () -> Void,
-        onCancel: @escaping () -> Void
+        onBack: @escaping () -> Void
     ) {
         self.titleText = title
         self.mode = mode
         self.onPhoto = onPhoto
         self.onVideo = onVideo
         self.onBack = onBack
-        self.onNext = onNext
-        self.onCancel = onCancel
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -160,7 +150,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
 
         let titleLabel = makeLabel(titleText.uppercased(), size: 27, weight: .bold)
         let subtitleLabel = makeLabel(
-            mode == .photo ? "Fit the whole card inside the corners" : "Move slowly around the card surface",
+            mode == .photo ? "" : "Move slowly around the card surface",
             size: 14,
             weight: .medium
         )
@@ -199,15 +189,6 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         backButton.addAction(UIAction { [weak self] _ in self?.handleBack() }, for: .touchUpInside)
         view.addSubview(backButton)
 
-        let cancelButton = makeButton(title: "Cancel", imageName: "xmark")
-        cancelButton.addAction(UIAction { [weak self] _ in self?.handleCancel() }, for: .touchUpInside)
-        view.addSubview(cancelButton)
-
-        let nextButton = makeButton(title: "Next", imageName: "chevron.right")
-        nextButton.isHidden = mode == .video
-        nextButton.addAction(UIAction { [weak self] _ in self?.handleNext() }, for: .touchUpInside)
-        view.addSubview(nextButton)
-
         let captureButton = UIButton(type: .custom)
         captureButton.translatesAutoresizingMaskIntoConstraints = false
         captureButton.backgroundColor = .white
@@ -227,7 +208,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         view.addSubview(captureButton)
 
         let hint = makeLabel(
-            mode == .photo ? "Photo includes an approximate 1 cm border" : "1080p HD video, up to 30 seconds",
+            mode == .photo ? "" : "1080p HD video, up to 30 seconds",
             size: 12,
             weight: .medium
         )
@@ -247,10 +228,6 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
             backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            cancelButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
-            cancelButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            nextButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
-            nextButton.topAnchor.constraint(equalTo: cancelButton.bottomAnchor, constant: 10),
             captureButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             captureButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -50),
             captureButton.widthAnchor.constraint(equalToConstant: 76),
@@ -700,18 +677,6 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         guard !isRecording else { return }
         hasFinished = true
         onBack()
-    }
-
-    private func handleNext() {
-        guard !isRecording else { return }
-        hasFinished = true
-        onNext()
-    }
-
-    private func handleCancel() {
-        guard !isRecording else { return }
-        hasFinished = true
-        onCancel()
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {

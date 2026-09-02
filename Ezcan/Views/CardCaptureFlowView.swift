@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum CaptureStage: String, Identifiable, Equatable {
     case front
@@ -50,6 +51,7 @@ struct CardCaptureFlowView: View {
     @State private var cardGeneration = 0
     @State private var isCameraDismissing = false
     @State private var pendingUpload: PendingUpload?
+    @State private var frontPhotoURL: URL?
 
     var body: some View {
         ZStack {
@@ -92,16 +94,6 @@ struct CardCaptureFlowView: View {
                     cameraStage = nil
                     isCameraDismissing = false
                     goBack(from: stage)
-                },
-                onNext: {
-                    cameraStage = nil
-                    isCameraDismissing = false
-                    goNext(from: stage)
-                },
-                onCancel: {
-                    cameraStage = nil
-                    isCameraDismissing = false
-                    phase = stage == .front || stage == .back ? .options : .options
                 }
             )
             .ignoresSafeArea()
@@ -221,9 +213,6 @@ struct CardCaptureFlowView: View {
                     Text("CARD MEDIA")
                         .font(.system(size: 28, weight: .black, design: .rounded))
                         .foregroundStyle(EzcanTheme.ink)
-                    Text("Choose what to add before archiving.")
-                        .font(.subheadline)
-                        .foregroundStyle(EzcanTheme.muted)
                 }
                 EzcanInstrumentRing(progress: captureProgress, accent: captureProgressIsComplete ? EzcanTheme.green : EzcanTheme.cyan) {
                     CaptureProgressButton(isComplete: captureProgressIsComplete) {
@@ -385,10 +374,6 @@ struct CardCaptureFlowView: View {
                 Text("Archive this card")
                     .font(.title2.bold())
                     .foregroundStyle(EzcanTheme.ink)
-                Text("Choose its four-character storage code.")
-                    .font(.subheadline)
-                    .foregroundStyle(EzcanTheme.muted)
-                    .multilineTextAlignment(.center)
                 TextField("A2B4", text: $archiveCode)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
@@ -406,9 +391,6 @@ struct CardCaptureFlowView: View {
                         archiveCode = ArchiveCodeRules.filtered(value)
                     }
                     .frame(maxWidth: 360)
-                Text("Letter, number, letter, number")
-                    .font(.caption)
-                    .foregroundStyle(EzcanTheme.muted)
                 HStack(spacing: 12) {
                     Button {
                         phase = .options
@@ -420,13 +402,9 @@ struct CardCaptureFlowView: View {
                     Button {
                         Task { await finishCard() }
                     } label: {
-                        if isBusy {
-                            ProgressView().tint(EzcanTheme.ink)
-                        } else {
-                            Label("Archive card", systemImage: "checkmark.circle.fill")
-                        }
+                        archiveCardButton
                     }
-                    .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.blue))
+                    .buttonStyle(.plain)
                     .frame(maxWidth: .infinity, minHeight: 56)
                     .disabled(!ArchiveCodeRules.isValid(archiveCode) || isBusy)
                 }
@@ -511,6 +489,57 @@ struct CardCaptureFlowView: View {
             .shadow(color: EzcanTheme.shadow, radius: 8, y: 4)
     }
 
+    private var archiveCardButton: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [Color(red: 0.97, green: 0.73, blue: 0.17), Color(red: 0.92, green: 0.33, blue: 0.35)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+            if let frontPhotoURL,
+               let image = UIImage(contentsOfFile: frontPhotoURL.path) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 112, height: 112)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay { LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .top, endPoint: .bottom) }
+                    .padding(6)
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(width: 112, height: 112)
+            }
+            HStack {
+                Spacer()
+                VStack(alignment: .trailing, spacing: 5) {
+                    if isBusy {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title2)
+                        Text("ARCHIVE CARD")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                    }
+                    Text(archiveCode.isEmpty ? "READY" : archiveCode)
+                        .font(.system(size: 19, weight: .bold, design: .monospaced))
+                }
+                .foregroundStyle(.white)
+                .padding(.trailing, 18)
+            }
+        }
+        .frame(height: 124)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(0.72), lineWidth: 2)
+        }
+        .shadow(color: Color(red: 0.92, green: 0.33, blue: 0.35).opacity(0.55), radius: 16, y: 8)
+        .opacity(ArchiveCodeRules.isValid(archiveCode) && !isBusy ? 1 : 0.58)
+    }
+
     private func stageIndex(_ stage: CaptureStage) -> Int {
         switch stage {
         case .front: return 1
@@ -543,6 +572,9 @@ struct CardCaptureFlowView: View {
     private func upload(_ media: CapturedMedia, for stage: CaptureStage) {
         guard let intakeID, let pairing = pairingStore.pairing else { return }
         CrashReporter.shared.record("Uploading \(media.fileName) to computer")
+        if stage == .front {
+            frontPhotoURL = cacheFrontPhoto(media, intakeID: intakeID)
+        }
         let namedMedia = media.named(nextFileName(for: stage, original: media.fileName))
         capturedMedia.append(namedMedia)
         isBusy = true
@@ -609,13 +641,6 @@ struct CardCaptureFlowView: View {
         }
     }
 
-    private func goNext(from stage: CaptureStage) {
-        switch stage {
-        case .front: phase = .capturing(.back)
-        case .back, .additional, .video: phase = .options
-        }
-    }
-
     private func finishCard() async {
         guard let intakeID, let pairing = pairingStore.pairing else { return }
         isBusy = true
@@ -623,6 +648,7 @@ struct CardCaptureFlowView: View {
             let receipt = try await LocalReceiverClient(pairing: pairing).completeIntake(intakeID, archiveCode: archiveCode)
             await MainActor.run {
                 isBusy = false
+                deleteCachedFrontPhoto()
                 phase = .complete(receipt.archiveCode)
             }
         } catch {
@@ -631,6 +657,29 @@ struct CardCaptureFlowView: View {
                 statusMessage = "Upload failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    private func cacheFrontPhoto(_ media: CapturedMedia, intakeID: String) -> URL? {
+        guard let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let directory = cachesDirectory.appendingPathComponent("Ezcan", isDirectory: true)
+        let destination = directory.appendingPathComponent("front-\(intakeID).jpg")
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.copyItem(at: media.fileURL, to: destination)
+            return destination
+        } catch {
+            return nil
+        }
+    }
+
+    private func deleteCachedFrontPhoto() {
+        if let frontPhotoURL {
+            try? FileManager.default.removeItem(at: frontPhotoURL)
+        }
+        frontPhotoURL = nil
     }
 
     private func resetForNextCard() {
@@ -642,6 +691,7 @@ struct CardCaptureFlowView: View {
         nameCounts = [:]
         isBusy = false
         statusMessage = nil
+        frontPhotoURL = nil
         hasStarted = false
         isCameraDismissing = false
         cardGeneration += 1
