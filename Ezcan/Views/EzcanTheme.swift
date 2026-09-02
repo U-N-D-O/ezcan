@@ -1,88 +1,63 @@
 import SwiftUI
 
 enum EzcanTheme {
-    static let midnight = Color(red: 0.025, green: 0.055, blue: 0.11)
-    static let deep = Color(red: 0.018, green: 0.035, blue: 0.07)
-    static let panel = Color(red: 0.055, green: 0.105, blue: 0.17)
-    static let panelRaised = Color(red: 0.075, green: 0.145, blue: 0.23)
-    static let panelDeep = Color(red: 0.025, green: 0.065, blue: 0.115)
-    static let cyan = Color(red: 0.20, green: 0.90, blue: 0.87)
-    static let blue = Color(red: 0.30, green: 0.55, blue: 1.0)
-    static let magenta = Color(red: 0.90, green: 0.22, blue: 0.43)
-    static let green = Color(red: 0.34, green: 0.95, blue: 0.53)
-    static let amber = Color(red: 0.96, green: 0.72, blue: 0.28)
-    static let text = Color(red: 0.95, green: 0.98, blue: 1.0)
-    static let muted = Color(red: 0.52, green: 0.64, blue: 0.77)
-    static let border = Color(red: 0.13, green: 0.28, blue: 0.40)
+    static let canvas = Color(red: 0.955, green: 0.969, blue: 0.973)
+    static let white = Color.white
+    static let ink = Color(red: 0.145, green: 0.212, blue: 0.239)
+    static let muted = Color(red: 0.455, green: 0.541, blue: 0.565)
+    static let cyan = Color(red: 0.075, green: 0.788, blue: 0.839)
+    static let cyanSoft = Color(red: 0.847, green: 0.961, blue: 0.965)
+    static let green = Color(red: 0.294, green: 0.820, blue: 0.549)
+    static let greenSoft = Color(red: 0.890, green: 0.976, blue: 0.929)
+    static let blue = Color(red: 0.282, green: 0.529, blue: 0.969)
+    static let blueSoft = Color(red: 0.898, green: 0.929, blue: 1.0)
+    static let amber = Color(red: 0.937, green: 0.667, blue: 0.235)
+    static let amberSoft = Color(red: 1.0, green: 0.957, blue: 0.855)
+    static let pink = Color(red: 0.902, green: 0.416, blue: 0.569)
+    static let pinkSoft = Color(red: 1.0, green: 0.918, blue: 0.945)
+    static let line = Color(red: 0.850, green: 0.890, blue: 0.902)
+    static let shadow = Color(red: 0.220, green: 0.302, blue: 0.329).opacity(0.10)
+    static let border = line
+    static let text = ink
+    static let midnight = canvas
+    static let deep = canvas
+    static let panel = white
+    static let panelRaised = white
+    static let panelDeep = Color(red: 0.973, green: 0.984, blue: 0.986)
+    static let magenta = pink
 }
 
 struct EzcanBackground: View {
     var body: some View {
-        Canvas { context, size in
-            let gridColor = EzcanTheme.cyan.opacity(0.055)
-            var grid = Path()
-            stride(from: CGFloat(0), through: size.width, by: 42).forEach { x in
-                grid.move(to: CGPoint(x: x, y: 0))
-                grid.addLine(to: CGPoint(x: x, y: size.height))
-            }
-            stride(from: CGFloat(0), through: size.height, by: 42).forEach { y in
-                grid.move(to: CGPoint(x: 0, y: y))
-                grid.addLine(to: CGPoint(x: size.width, y: y))
-            }
-            context.stroke(grid, with: .color(gridColor), lineWidth: 0.5)
-
-            var network = Path()
-            let points = [
-                CGPoint(x: size.width * 0.04, y: size.height * 0.18),
-                CGPoint(x: size.width * 0.24, y: size.height * 0.08),
-                CGPoint(x: size.width * 0.44, y: size.height * 0.21),
-                CGPoint(x: size.width * 0.68, y: size.height * 0.10),
-                CGPoint(x: size.width * 0.94, y: size.height * 0.20)
-            ]
-            for index in 0..<points.count - 1 {
-                network.move(to: points[index])
-                network.addLine(to: points[index + 1])
-            }
-            context.stroke(network, with: .color(EzcanTheme.cyan.opacity(0.12)), lineWidth: 1)
-            for point in points {
-                context.fill(Path(ellipseIn: CGRect(x: point.x - 2, y: point.y - 2, width: 4, height: 4)), with: .color(EzcanTheme.cyan.opacity(0.55)))
-            }
-        }
-        .background(
+        ZStack {
+            EzcanTheme.canvas
             LinearGradient(
-                colors: [EzcanTheme.midnight, EzcanTheme.deep],
+                colors: [Color.white.opacity(0.92), EzcanTheme.canvas.opacity(0.72)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-        )
+        }
         .ignoresSafeArea()
     }
 }
 
 struct EzcanPanelModifier: ViewModifier {
-    var accent: Color = EzcanTheme.border
+    var accent: Color = EzcanTheme.line
     var glow: Bool = false
 
     func body(content: Content) -> some View {
         content
-            .background(
-                LinearGradient(
-                    colors: [EzcanTheme.panelRaised.opacity(0.94), EzcanTheme.panel.opacity(0.94)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-            )
+            .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(accent.opacity(glow ? 0.9 : 0.55), lineWidth: glow ? 1.5 : 1)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(accent.opacity(glow ? 0.55 : 0.7), lineWidth: 1)
             }
-            .shadow(color: glow ? accent.opacity(0.22) : .black.opacity(0.2), radius: glow ? 16 : 8, y: 5)
+            .shadow(color: glow ? accent.opacity(0.15) : EzcanTheme.shadow, radius: glow ? 18 : 14, y: 7)
     }
 }
 
 extension View {
-    func ezcanPanel(accent: Color = EzcanTheme.border, glow: Bool = false) -> some View {
+    func ezcanPanel(accent: Color = EzcanTheme.line, glow: Bool = false) -> some View {
         modifier(EzcanPanelModifier(accent: accent, glow: glow))
     }
 }
@@ -92,35 +67,29 @@ struct EzcanStatusPill: View {
     var color: Color = EzcanTheme.green
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             Circle()
                 .fill(color)
                 .frame(width: 7, height: 7)
-                .shadow(color: color.opacity(0.9), radius: 5)
             Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .tracking(0.4)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(0.5)
                 .foregroundStyle(color)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 11)
         .padding(.vertical, 8)
-        .background(color.opacity(0.10), in: Capsule())
-        .overlay { Capsule().stroke(color.opacity(0.65), lineWidth: 1) }
+        .background(color.opacity(0.12), in: Capsule())
     }
 }
 
 struct EzcanPrimaryButtonStyle: ButtonStyle {
-    var color: Color = EzcanTheme.blue
+    var color: Color = EzcanTheme.cyan
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(.white)
-            .background(
-                LinearGradient(colors: [color, color.opacity(0.68)], startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: Capsule()
-            )
-            .overlay { Capsule().stroke(.white.opacity(0.25), lineWidth: 1) }
-            .shadow(color: color.opacity(configuration.isPressed ? 0.2 : 0.45), radius: configuration.isPressed ? 5 : 12)
+            .foregroundStyle(EzcanTheme.ink)
+            .background(color.opacity(configuration.isPressed ? 0.72 : 1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: color.opacity(configuration.isPressed ? 0.08 : 0.22), radius: configuration.isPressed ? 4 : 10, y: 5)
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
     }
 }
@@ -128,9 +97,32 @@ struct EzcanPrimaryButtonStyle: ButtonStyle {
 struct EzcanSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(EzcanTheme.text)
-            .background(EzcanTheme.panelRaised.opacity(configuration.isPressed ? 0.9 : 0.72), in: Capsule())
-            .overlay { Capsule().stroke(EzcanTheme.cyan.opacity(0.42), lineWidth: 1) }
-            .shadow(color: EzcanTheme.cyan.opacity(configuration.isPressed ? 0.08 : 0.14), radius: 9)
+            .foregroundStyle(EzcanTheme.ink)
+            .background(EzcanTheme.white.opacity(configuration.isPressed ? 0.72 : 1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(EzcanTheme.line, lineWidth: 1) }
+            .shadow(color: EzcanTheme.shadow, radius: 8, y: 4)
+    }
+}
+
+struct EzcanNavigationItem: View {
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(isSelected ? EzcanTheme.cyan : EzcanTheme.muted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(isSelected ? EzcanTheme.cyanSoft : .clear, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }

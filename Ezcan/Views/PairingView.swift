@@ -12,79 +12,37 @@ struct PairingView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                EzcanBackground()
-                ScrollView {
+            HStack(spacing: 0) {
+                pairingRail
+                ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
-                        GeometryReader { proxy in
-                            pairingHeader(compact: proxy.size.width < 370)
-                        }
-                        .frame(height: 44)
-
-                        VStack(spacing: 14) {
-                            Image("ezcan_logo")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 112, height: 112)
-                            Text("CONNECT TO EZCAN")
-                                .font(.system(size: 23, weight: .black, design: .rounded))
-                                .tracking(1.4)
-                                .foregroundStyle(EzcanTheme.text)
-                            Text("Scan the QR code in Ezcan Computer to connect this iPhone.")
-                                .font(.subheadline)
-                                .foregroundStyle(EzcanTheme.muted)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
-                        .ezcanPanel(accent: EzcanTheme.cyan, glow: true)
-
+                        pairingHeader
+                        connectionCard
                         Button {
                             scannerPresented = true
                         } label: {
-                            Label("SCAN COMPUTER QR CODE", systemImage: "qrcode.viewfinder")
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                            Label("Scan computer QR code", systemImage: "qrcode.viewfinder")
+                                .font(.headline)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 16)
                         }
                         .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.cyan))
-
-                        VStack(alignment: .leading, spacing: 13) {
-                            Text("MANUAL PAIRING")
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .tracking(1)
-                                .foregroundStyle(EzcanTheme.cyan)
-                            inputField("COMPUTER ADDRESS", text: $computerURL, placeholder: "http://192.168.1.25:8765")
-                            inputField("PAIRING TOKEN", text: $token, placeholder: "Temporary token")
-                            inputField("COMPUTER NAME (OPTIONAL)", text: $computerName, placeholder: "Ezcan Computer")
-                            Button {
-                                pairManually()
-                            } label: {
-                                Text("PAIR MANUALLY")
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                            }
-                            .buttonStyle(EzcanSecondaryButtonStyle())
-                            .disabled(token.isEmpty || computerURL == "http://")
-                            .opacity(token.isEmpty || computerURL == "http://" ? 0.45 : 1)
-                        }
-                        .padding(18)
-                        .ezcanPanel()
-
+                        manualPairingCard
                         if let errorMessage = pairingStore.errorMessage {
                             Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                                 .font(.footnote)
-                                .foregroundStyle(EzcanTheme.magenta)
+                                .foregroundStyle(EzcanTheme.pink)
                                 .padding(16)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .ezcanPanel(accent: EzcanTheme.magenta)
+                                .ezcanPanel(accent: EzcanTheme.pink)
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 18)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 26)
                 }
+                .frame(maxWidth: .infinity)
             }
+            .background(EzcanBackground())
             .toolbar(.hidden, for: .navigationBar)
             .fullScreenCover(isPresented: $scannerPresented) {
                 QRScannerView { payload in
@@ -102,33 +60,106 @@ struct PairingView: View {
         }
     }
 
-    private func pairingHeader(compact: Bool) -> some View {
-        HStack(alignment: .top, spacing: compact ? 8 : 12) {
+    private var pairingRail: some View {
+        VStack(spacing: 12) {
+            Image("ezcan_logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 38, height: 38)
+                .padding(.bottom, 24)
+            RoundedRectangle(cornerRadius: 1)
+                .fill(EzcanTheme.line)
+                .frame(width: 24, height: 1)
+            Spacer()
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.title3)
+                .foregroundStyle(EzcanTheme.cyan)
+            Text("PAIR")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(EzcanTheme.muted)
+            Spacer()
+            Text("01")
+                .font(.caption.monospacedDigit().bold())
+                .foregroundStyle(EzcanTheme.muted)
+        }
+        .frame(width: 78)
+        .padding(.vertical, 24)
+        .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: EzcanTheme.shadow, radius: 14, y: 5)
+        .padding(.leading, 12)
+        .padding(.vertical, 14)
+    }
+
+    private var pairingHeader: some View {
+        HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("EZCAN")
-                    .font(.system(size: compact ? 27 : 30, weight: .black, design: .rounded))
-                    .tracking(2)
-                    .foregroundStyle(EzcanTheme.text)
-                if !compact {
-                    Text("CARD OPERATIONS CONSOLE")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .tracking(0.8)
-                        .foregroundStyle(EzcanTheme.cyan)
-                }
+                Text("Welcome back")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(EzcanTheme.muted)
+                Text("Connect your workspace")
+                    .font(.system(size: 27, weight: .bold, design: .rounded))
+                    .foregroundStyle(EzcanTheme.ink)
             }
             Spacer()
-            EzcanStatusPill(title: compact ? "PAIR" : "AWAITING PAIRING", color: EzcanTheme.amber)
+            EzcanStatusPill(title: "AWAITING PAIRING", color: EzcanTheme.amber)
         }
+    }
+
+    private var connectionCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: "link.circle.fill")
+                    .font(.system(size: 27))
+                    .foregroundStyle(EzcanTheme.cyan)
+                Spacer()
+                Text("01")
+                    .font(.caption.monospacedDigit().bold())
+                    .foregroundStyle(EzcanTheme.muted)
+            }
+            Text("Connect to Ezcan")
+                .font(.title2.bold())
+                .foregroundStyle(EzcanTheme.ink)
+            Text("Scan the QR code shown in Ezcan Computer to begin.")
+                .font(.subheadline)
+                .foregroundStyle(EzcanTheme.muted)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .ezcanPanel(accent: EzcanTheme.cyan, glow: true)
+    }
+
+    private var manualPairingCard: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Text("Enter details manually")
+                .font(.headline)
+                .foregroundStyle(EzcanTheme.ink)
+            inputField("Computer address", text: $computerURL, placeholder: "http://192.168.1.25:8765")
+            inputField("Pairing token", text: $token, placeholder: "Temporary token")
+            inputField("Computer name", text: $computerName, placeholder: "Optional")
+            Button {
+                pairManually()
+            } label: {
+                Text("Pair manually")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+            .buttonStyle(EzcanSecondaryButtonStyle())
+            .disabled(token.isEmpty || computerURL == "http://")
+            .opacity(token.isEmpty || computerURL == "http://" ? 0.45 : 1)
+        }
+        .padding(20)
+        .ezcanPanel()
     }
 
     private func inputField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(EzcanTheme.muted)
             TextField(placeholder, text: text)
-                .font(.system(size: 14, design: .monospaced))
-                .foregroundStyle(EzcanTheme.text)
+                .font(.body)
+                .foregroundStyle(EzcanTheme.ink)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding(.horizontal, 13)
@@ -136,7 +167,7 @@ struct PairingView: View {
                 .background(EzcanTheme.panelDeep, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(EzcanTheme.border, lineWidth: 1)
+                        .stroke(EzcanTheme.line, lineWidth: 1)
                 }
         }
     }
