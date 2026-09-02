@@ -671,7 +671,7 @@ class DesktopWindow:
             tk.Label(
                 navigation,
                 text=title,
-                bg=self.cyan_soft if index == 0 else self.panel_alt,
+                bg="#d8f5f6" if index == 0 else self.panel_alt,
                 fg=color,
                 padx=17,
                 pady=8,
