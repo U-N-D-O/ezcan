@@ -504,7 +504,7 @@ class DesktopWindow:
         self.server = server
         self.store: Store = application.state.store
         self.root = tk.Tk()
-        self.root.overrideredirect(True)
+        self.root.title("Ezcan Card Workbench")
         self.root.geometry("1220x820")
         self.root.minsize(980, 680)
         self.root.configure(bg=self.background)
@@ -651,8 +651,6 @@ class DesktopWindow:
     def build_layout(self) -> None:
         shell = tk.Frame(self.root, bg=self.background)
         shell.pack(fill="both", expand=True, padx=42, pady=34)
-        shell.bind("<ButtonPress-1>", self.begin_move)
-        shell.bind("<B1-Motion>", self.move_window)
         self.root.bind("<Escape>", lambda _event: self.close())
 
         workspace = tk.Frame(shell, bg=self.background)
@@ -665,6 +663,7 @@ class DesktopWindow:
         self.build_connection_dock(workspace).grid(row=0, column=0, sticky="nsew", padx=(0, 42))
         self.build_archive_surface(workspace).grid(row=0, column=1, sticky="nsew")
         self.build_action_strip(workspace).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(30, 0))
+        self.root.state("zoomed")
 
     def raised_surface(self, parent: tk.Misc, accent: str | None = None) -> tuple[tk.Frame, tk.Frame]:
         shadow = tk.Frame(parent, bg="#d6e1e4", padx=4, pady=4)
@@ -956,15 +955,6 @@ class DesktopWindow:
         self.root.clipboard_append(value)
         self.connection_var.set("ADDRESS COPIED  •  PRIVATE NETWORK")
         self.root.after(2200, lambda: self.connection_var.set("ONLINE  •  PRIVATE NETWORK"))
-
-    def begin_move(self, event: tk.Event) -> None:
-        self.move_origin = (event.x_root, event.y_root, self.root.winfo_x(), self.root.winfo_y())
-
-    def move_window(self, event: tk.Event) -> None:
-        start_x, start_y, window_x, window_y = self.move_origin
-        self.root.geometry(
-            "+{}+{}".format(window_x + event.x_root - start_x, window_y + event.y_root - start_y)
-        )
 
     def open_archive(self) -> None:
         try:
