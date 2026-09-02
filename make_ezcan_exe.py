@@ -17,6 +17,16 @@ def run_build() -> int:
         print(f"Could not find the computer program: {SOURCE_FILE}")
         return 1
 
+    executable = DIST_DIR / "EzcanComputer.exe"
+    if executable.is_file():
+        try:
+            executable.unlink()
+        except PermissionError:
+            print(f"Could not replace {executable} because Windows has it open.")
+            print("Close EzcanComputer.exe, then run this builder again.")
+            print("If it is not visible, end the EzcanComputer.exe process in Task Manager.")
+            return 1
+
     command = [
         sys.executable,
         "-m",
@@ -45,7 +55,6 @@ def run_build() -> int:
         print(f"Install it with: {sys.executable} -m pip install pyinstaller")
         return 1
 
-    executable = DIST_DIR / "EzcanComputer.exe"
     if result.returncode == 0 and executable.is_file():
         print(f"\nBuild complete:\n{executable}")
         return 0

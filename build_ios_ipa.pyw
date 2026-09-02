@@ -54,87 +54,7 @@ class EzcanIPABuilder:
         window.minsize(620, 620)
         window.configure(bg=WHITE)
 
-        outer = tk.Frame(window, bg=WHITE, padx=42, pady=30)
-        outer.pack(fill="both", expand=True)
-
-        header = tk.Frame(outer, bg=WHITE)
-        header.pack(fill="x")
-        header.bind("<ButtonPress-1>", self.begin_move)
-        header.bind("<B1-Motion>", self.move_window)
-        tk.Label(header, text="EZCAN", bg=WHITE, fg=INK, font=("Segoe UI", 16, "bold"), anchor="w").pack(side="left")
-        tk.Label(header, text="IOS BUILD CONSOLE", bg=WHITE, fg=MUTED, font=("Segoe UI", 9, "bold"), anchor="w").pack(side="left", padx=(12, 0), pady=(4, 0))
-        close_button = tk.Button(
-            header,
-            text="×",
-            command=self.close,
-            bg=WHITE,
-            fg=MUTED,
-            activebackground=CYAN_PALE,
-            activeforeground=INK,
-            relief="flat",
-            bd=0,
-            font=("Segoe UI", 16),
-            cursor="hand2",
-            padx=4,
-        )
-        close_button.pack(side="right", padx=(8, 0))
-        self.online = tk.Label(header, text="●  ONLINE", bg=WHITE, fg=CYAN, font=("Segoe UI", 9, "bold"))
-        self.online.pack(side="right", pady=(4, 0))
-
-        tk.Frame(outer, bg=LINE, height=1).pack(fill="x", pady=(20, 0))
-
-        dial_area = tk.Frame(outer, bg=WHITE)
-        dial_area.pack(fill="both", expand=True, pady=(12, 0))
-        self.dial = tk.Canvas(dial_area, width=330, height=330, bg=WHITE, highlightthickness=0)
-        self.dial.pack(pady=(0, 0))
-        self.dial.create_oval(32, 32, 298, 298, outline="#e4eaec", width=1)
-        self.dial.create_arc(46, 46, 284, 284, start=90, extent=-360, outline=CYAN_PALE, width=8, style="arc")
-        self.dial.create_oval(63, 63, 267, 267, outline=LINE, width=1)
-        self.dial_arc = self.dial.create_arc(46, 46, 284, 284, start=90, extent=0, outline=CYAN, width=8, style="arc")
-        self.dial_percent = self.dial.create_text(165, 143, text="0%", fill=INK, font=("Segoe UI", 30, "bold"))
-        self.dial_state = self.dial.create_text(165, 184, text="READY", fill=CYAN, font=("Segoe UI", 10, "bold"))
-        self.dial_detail = self.dial.create_text(165, 207, text="SYSTEM STANDBY", fill=MUTED, font=("Segoe UI", 8))
-
-        self.status = tk.Label(outer, text="Ready to build the latest unsigned IPA", bg=WHITE, fg=INK, font=("Segoe UI", 12))
-        self.status.pack(pady=(0, 8))
-        self.progress = tk.Canvas(outer, height=5, bg=CYAN_PALE, highlightthickness=0)
-        self.progress.pack(fill="x", pady=(0, 18))
-        self.progress_fill = self.progress.create_rectangle(0, 0, 0, 5, fill=CYAN, outline="")
-
-        activation_row = tk.Frame(outer, bg=WHITE)
-        activation_row.pack(pady=(0, 20))
-        self.activate_button = tk.Canvas(activation_row, width=230, height=86, bg=WHITE, highlightthickness=0, cursor="hand2")
-        self.activate_button.pack()
-        self.activate_button.create_oval(12, 8, 218, 78, fill=GREEN_PALE, outline=GREEN, width=1)
-        self.activate_icon = self.activate_button.create_text(50, 43, text="\u23fb", fill=GREEN, font=("Segoe UI Symbol", 25, "bold"))
-        self.activate_label = self.activate_button.create_text(132, 43, text="ACTIVATE BUILD", fill=GREEN, font=("Segoe UI", 11, "bold"))
-        self.activate_button.bind("<Button-1>", lambda _event: self.start())
-        self.activate_button.bind("<Enter>", lambda _event: self.activate_button.itemconfigure(self.activate_icon, fill="#22b970"))
-        self.activate_button.bind("<Leave>", lambda _event: self.activate_button.itemconfigure(self.activate_icon, fill=GREEN))
-
-        log_header = tk.Frame(outer, bg=WHITE)
-        log_header.pack(fill="x")
-        tk.Label(log_header, text="ACTIVITY", bg=WHITE, fg=MUTED, font=("Segoe UI", 8, "bold"), anchor="w").pack(side="left")
-        tk.Label(log_header, text="OUTPUT  /  artifacts\\ios", bg=WHITE, fg=MUTED, font=("Segoe UI", 8), anchor="e").pack(side="right")
-        log_frame = tk.Frame(outer, bg=WHITE, highlightbackground=LINE, highlightthickness=1)
-        log_frame.pack(fill="both", expand=False, pady=(7, 0))
-        self.log = tk.Text(
-            log_frame,
-            height=7,
-            state="disabled",
-            wrap="word",
-            bg="#fbfcfc",
-            fg="#60747c",
-            insertbackground=INK,
-            relief="flat",
-            padx=14,
-            pady=12,
-            font=("Consolas", 9),
-        )
-        scrollbar = tk.Scrollbar(log_frame, orient="vertical", command=self.log.yview, bg=WHITE, troughcolor=WHITE, relief="flat", highlightthickness=0)
-        self.log.configure(yscrollcommand=scrollbar.set)
-        self.log.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        self.build_console()
 
         self.window.after(100, self.process_events)
 
@@ -147,6 +67,135 @@ class EzcanIPABuilder:
 
     def close(self):
         self.window.destroy()
+
+    def build_console(self):
+        shell = tk.Frame(self.window, bg=WHITE, padx=28, pady=22)
+        shell.pack(fill="both", expand=True)
+
+        header_shadow = tk.Frame(shell, bg=LINE, padx=3, pady=3)
+        header_shadow.pack(fill="x", pady=(0, 18))
+        header = tk.Frame(header_shadow, bg=WHITE, padx=16, pady=8)
+        header.pack(fill="x")
+        header.bind("<ButtonPress-1>", self.begin_move)
+        header.bind("<B1-Motion>", self.move_window)
+        brand = tk.Frame(header, bg=WHITE)
+        brand.pack(side="left")
+        tk.Label(brand, text="EZCAN", bg=WHITE, fg=INK, font=("Bahnschrift", 19, "bold")).pack(side="left")
+        tk.Label(brand, text="  IOS DELIVERY", bg=WHITE, fg=MUTED, font=("Consolas", 8, "bold")).pack(side="left", pady=(5, 0))
+        modes = tk.Frame(header, bg="#edf4f5", padx=4, pady=4)
+        modes.pack(side="left", padx=28)
+        for title, selected in (("BUILD", True), ("ARTIFACTS", False), ("ACTIVITY", False)):
+            tk.Label(
+                modes,
+                text=title,
+                bg=CYAN_PALE if selected else "#edf4f5",
+                fg=CYAN if selected else MUTED,
+                padx=12,
+                pady=7,
+                font=("Consolas", 8, "bold"),
+            ).pack(side="left", padx=2)
+        tk.Button(
+            header,
+            text="×",
+            command=self.close,
+            bg=WHITE,
+            fg=MUTED,
+            activebackground=CYAN_PALE,
+            activeforeground=INK,
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 16),
+            cursor="hand2",
+            padx=5,
+        ).pack(side="right", padx=(10, 0))
+        self.online = tk.Label(header, text="●  ONLINE", bg=WHITE, fg=CYAN, font=("Consolas", 8, "bold"))
+        self.online.pack(side="right", pady=(3, 0))
+
+        workspace = tk.Frame(shell, bg=WHITE)
+        workspace.pack(fill="both", expand=True)
+        workspace.grid_columnconfigure(0, weight=3)
+        workspace.grid_columnconfigure(1, weight=2)
+        workspace.grid_rowconfigure(0, weight=1)
+        workspace.grid_rowconfigure(1, weight=0)
+
+        self.build_build_surface(workspace).grid(row=0, column=0, sticky="nsew", padx=(0, 18))
+        self.build_pipeline_surface(workspace).grid(row=0, column=1, sticky="nsew")
+        self.build_activity_surface(workspace).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(18, 0))
+
+    def build_build_surface(self, parent):
+        shadow = tk.Frame(parent, bg=LINE, padx=4, pady=4)
+        content = tk.Frame(shadow, bg=WHITE, highlightbackground=CYAN, highlightthickness=1)
+        content.pack(fill="both", expand=True)
+        heading = tk.Frame(content, bg=WHITE, padx=22, pady=16)
+        heading.pack(fill="x")
+        tk.Label(heading, text="BUILD CONTROL", bg=WHITE, fg=INK, font=("Bahnschrift", 14, "bold")).pack(side="left")
+        tk.Label(heading, text="01  /  RELEASE STATION", bg=WHITE, fg=CYAN, font=("Consolas", 8, "bold")).pack(side="right", pady=3)
+
+        dial_area = tk.Frame(content, bg=WHITE)
+        dial_area.pack(fill="both", expand=True)
+        self.dial = tk.Canvas(dial_area, width=330, height=300, bg=WHITE, highlightthickness=0)
+        self.dial.pack(expand=True)
+        self.dial.create_oval(30, 15, 300, 285, outline="#e4eaec", width=1)
+        self.dial.create_arc(44, 29, 286, 271, start=90, extent=-360, outline=CYAN_PALE, width=9, style="arc")
+        self.dial.create_oval(62, 47, 268, 253, outline=LINE, width=1)
+        self.dial_arc = self.dial.create_arc(44, 29, 286, 271, start=90, extent=0, outline=CYAN, width=9, style="arc")
+        self.dial_percent = self.dial.create_text(165, 125, text="0%", fill=INK, font=("Bahnschrift", 30, "bold"))
+        self.dial_state = self.dial.create_text(165, 165, text="READY", fill=CYAN, font=("Consolas", 10, "bold"))
+        self.dial_detail = self.dial.create_text(165, 188, text="SYSTEM STANDBY", fill=MUTED, font=("Consolas", 8))
+        self.status = tk.Label(content, text="Ready to build the latest unsigned IPA", bg=WHITE, fg=INK, font=("Segoe UI", 11))
+        self.status.pack(pady=(0, 8))
+        self.progress = tk.Canvas(content, height=6, bg=CYAN_PALE, highlightthickness=0)
+        self.progress.pack(fill="x", padx=24, pady=(0, 14))
+        self.progress_fill = self.progress.create_rectangle(0, 0, 0, 6, fill=CYAN, outline="")
+        activation_row = tk.Frame(content, bg=WHITE)
+        activation_row.pack(pady=(0, 18))
+        self.activate_button = tk.Canvas(activation_row, width=230, height=76, bg=WHITE, highlightthickness=0, cursor="hand2")
+        self.activate_button.pack()
+        self.activate_button.create_oval(12, 6, 218, 70, fill=GREEN_PALE, outline=GREEN, width=1)
+        self.activate_icon = self.activate_button.create_text(50, 38, text="\u23fb", fill=GREEN, font=("Segoe UI Symbol", 24, "bold"))
+        self.activate_label = self.activate_button.create_text(132, 38, text="ACTIVATE BUILD", fill=GREEN, font=("Segoe UI", 11, "bold"))
+        self.activate_button.bind("<Button-1>", lambda _event: self.start())
+        self.activate_button.bind("<Enter>", lambda _event: self.activate_button.itemconfigure(self.activate_icon, fill="#22b970"))
+        self.activate_button.bind("<Leave>", lambda _event: self.activate_button.itemconfigure(self.activate_icon, fill=GREEN))
+        return shadow
+
+    def build_pipeline_surface(self, parent):
+        shadow = tk.Frame(parent, bg=LINE, padx=4, pady=4)
+        content = tk.Frame(shadow, bg=WHITE, highlightbackground=LINE, highlightthickness=1)
+        content.pack(fill="both", expand=True)
+        tk.Label(content, text="BUILD SEQUENCE", bg=WHITE, fg=INK, font=("Bahnschrift", 14, "bold")).pack(anchor="w", padx=22, pady=(18, 3))
+        tk.Label(content, text="The release moves through each station automatically.", bg=WHITE, fg=MUTED, font=("Segoe UI", 9), wraplength=250, justify="left").pack(anchor="w", padx=22)
+        sequence = tk.Frame(content, bg=WHITE)
+        sequence.pack(fill="x", padx=22, pady=20)
+        steps = (("CHECK", "Repository and credentials", CYAN), ("COMMIT", "Stage source changes", GREEN), ("ACTIONS", "Build on macOS runner", CYAN), ("DOWNLOAD", "Save IPA artifact", CYAN))
+        for index, (title, detail, color) in enumerate(steps, start=1):
+            row = tk.Frame(sequence, bg=WHITE)
+            row.pack(fill="x", pady=7)
+            tk.Label(row, text="{:02d}".format(index), bg=CYAN_PALE if index == 1 else "#edf4f5", fg=color, font=("Consolas", 8, "bold"), width=4, pady=7).pack(side="left")
+            copy = tk.Frame(row, bg=WHITE)
+            copy.pack(side="left", padx=12)
+            tk.Label(copy, text=title, bg=WHITE, fg=INK, font=("Consolas", 9, "bold")).pack(anchor="w")
+            tk.Label(copy, text=detail, bg=WHITE, fg=MUTED, font=("Segoe UI", 8)).pack(anchor="w", pady=(2, 0))
+        destination = tk.Frame(content, bg="#f4f9f9", padx=14, pady=12)
+        destination.pack(fill="x", padx=22, pady=(0, 18))
+        tk.Label(destination, text="DESTINATION", bg="#f4f9f9", fg=MUTED, font=("Consolas", 8, "bold")).pack(anchor="w")
+        tk.Label(destination, text="artifacts\\ios\\*.ipa", bg="#f4f9f9", fg=INK, font=("Consolas", 9)).pack(anchor="w", pady=(4, 0))
+        return shadow
+
+    def build_activity_surface(self, parent):
+        frame = tk.Frame(parent, bg=WHITE, highlightbackground=LINE, highlightthickness=1)
+        heading = tk.Frame(frame, bg=WHITE, padx=18, pady=10)
+        heading.pack(fill="x")
+        tk.Label(heading, text="ACTIVITY", bg=WHITE, fg=MUTED, font=("Consolas", 8, "bold"), anchor="w").pack(side="left")
+        tk.Label(heading, text="OUTPUT  /  artifacts\\ios", bg=WHITE, fg=MUTED, font=("Consolas", 8), anchor="e").pack(side="right")
+        log_frame = tk.Frame(frame, bg=WHITE)
+        log_frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.log = tk.Text(log_frame, height=5, state="disabled", wrap="word", bg="#fbfcfc", fg="#60747c", insertbackground=INK, relief="flat", padx=14, pady=10, font=("Consolas", 9))
+        scrollbar = tk.Scrollbar(log_frame, orient="vertical", command=self.log.yview, bg=WHITE, troughcolor=WHITE, relief="flat", highlightthickness=0)
+        self.log.configure(yscrollcommand=scrollbar.set)
+        self.log.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        return frame
 
     def update_dial(self, percent, state, detail):
         self.dial.itemconfigure(self.dial_arc, extent=-3.6 * percent)
