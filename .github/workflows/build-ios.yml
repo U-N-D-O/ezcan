@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-ipa:
     runs-on: macos-latest
@@ -54,3 +57,11 @@ jobs:
           path: Ezcan-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish direct IPA download
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ezcan-latest >/dev/null 2>&1 || gh release create ezcan-latest --title "Ezcan latest iOS IPA" --notes "Unsigned IPA for AltServer or AltStore."
+          gh release upload ezcan-latest Ezcan-unsigned.ipa --clobber
