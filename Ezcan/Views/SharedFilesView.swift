@@ -12,54 +12,76 @@ struct SharedFilesView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if isLoading && files.isEmpty {
-                    ProgressView("Checking computer...")
-                } else if files.isEmpty {
-                    ContentUnavailableView(
-                        "No files ready",
-                        systemImage: "tray",
-                        description: Text("Choose a file in the Ezcan Computer window first.")
-                    )
-                } else {
-                    List(files) { file in
-                        HStack(spacing: 14) {
-                            Image(systemName: file.fileName.lowercased().hasSuffix(".ipa") ? "iphone.gen3" : "doc.fill")
-                                .font(.title3)
-                                .foregroundStyle(file.fileName.lowercased().hasSuffix(".ipa") ? .blue : .orange)
-                                .frame(width: 38, height: 38)
-                                .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(file.fileName)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button {
-                                download(file)
-                            } label: {
-                                if downloadingID == file.id {
-                                    ProgressView()
-                                } else {
-                                    Image(systemName: "arrow.down.to.line")
+            ZStack {
+                EzcanBackground()
+                Group {
+                    if isLoading && files.isEmpty {
+                        ProgressView("CHECKING COMPUTER...")
+                            .tint(EzcanTheme.cyan)
+                            .foregroundStyle(EzcanTheme.text)
+                    } else if files.isEmpty {
+                        ContentUnavailableView(
+                            "NO FILES READY",
+                            systemImage: "tray",
+                            description: Text("Choose a file in the Ezcan Computer window first.")
+                        )
+                        .foregroundStyle(EzcanTheme.muted)
+                    } else {
+                        List(files) { file in
+                            HStack(spacing: 14) {
+                                Image(systemName: file.fileName.lowercased().hasSuffix(".ipa") ? "iphone.gen3" : "doc.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(file.fileName.lowercased().hasSuffix(".ipa") ? EzcanTheme.blue : EzcanTheme.amber)
+                                    .frame(width: 38, height: 38)
+                                    .background(EzcanTheme.panelDeep, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .overlay { RoundedRectangle(cornerRadius: 10).stroke(EzcanTheme.border, lineWidth: 1) }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(file.fileName)
+                                        .font(.headline)
+                                        .foregroundStyle(EzcanTheme.text)
+                                        .lineLimit(1)
+                                    Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
+                                        .font(.caption)
+                                        .foregroundStyle(EzcanTheme.muted)
                                 }
+                                Spacer()
+                                Button {
+                                    download(file)
+                                } label: {
+                                    if downloadingID == file.id {
+                                        ProgressView()
+                                            .tint(.white)
+                                    } else {
+                                        Image(systemName: "arrow.down.to.line")
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(EzcanTheme.blue)
+                                .disabled(downloadingID != nil)
+                                .accessibilityLabel("Download \(file.fileName)")
                             }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(downloadingID != nil)
-                            .accessibilityLabel("Download \(file.fileName)")
+                            .padding(.vertical, 7)
+                            .listRowBackground(EzcanTheme.panel.opacity(0.94))
+                            .listRowSeparator(.hidden)
                         }
-                        .padding(.vertical, 5)
+                        .scrollContentBackground(.hidden)
+                        .listStyle(.insetGrouped)
                     }
-                    .listStyle(.insetGrouped)
                 }
             }
-            .navigationTitle("Files from computer")
+            .navigationTitle("FILES FROM COMPUTER")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(EzcanTheme.deep.opacity(0.92), for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .tint(EzcanTheme.cyan)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel("Done")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

@@ -80,7 +80,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 0.03, green: 0.05, blue: 0.08, alpha: 1)
+        view.backgroundColor = UIColor(red: 0.025, green: 0.055, blue: 0.11, alpha: 1)
         buildView()
         requestCameraAccess()
     }
@@ -112,7 +112,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
 
         let shade = UIView()
         shade.translatesAutoresizingMaskIntoConstraints = false
-        shade.backgroundColor = UIColor.black.withAlphaComponent(0.18)
+        shade.backgroundColor = UIColor(red: 0.01, green: 0.03, blue: 0.06, alpha: 0.34)
         shade.isUserInteractionEnabled = false
         view.addSubview(shade)
         NSLayoutConstraint.activate([
@@ -137,12 +137,12 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             size: 14,
             weight: .medium
         )
-        subtitleLabel.textColor = UIColor.white.withAlphaComponent(0.82)
+        subtitleLabel.textColor = UIColor(red: 0.52, green: 0.64, blue: 0.77, alpha: 1)
         subtitleLabel.numberOfLines = 0
 
         timerLabel.translatesAutoresizingMaskIntoConstraints = false
         timerLabel.text = "00:00"
-        timerLabel.textColor = .white
+        timerLabel.textColor = UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 1)
         timerLabel.font = UIFont.monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
         timerLabel.textAlignment = .center
         timerLabel.isHidden = mode == .photo
@@ -150,10 +150,15 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
 
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.text = "Preparing camera..."
-        statusLabel.textColor = UIColor.white.withAlphaComponent(0.8)
+        statusLabel.textColor = UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 1)
         statusLabel.font = .systemFont(ofSize: 13)
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
+        statusLabel.backgroundColor = UIColor(red: 0.025, green: 0.065, blue: 0.115, alpha: 0.88)
+        statusLabel.layer.cornerRadius = 14
+        statusLabel.layer.borderWidth = 1
+        statusLabel.layer.borderColor = UIColor(red: 0.13, green: 0.28, blue: 0.40, alpha: 1).cgColor
+        statusLabel.clipsToBounds = true
         view.addSubview(statusLabel)
 
         let backButton = makeButton(title: "Back", imageName: "chevron.left")
@@ -173,8 +178,12 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         captureButton.translatesAutoresizingMaskIntoConstraints = false
         captureButton.backgroundColor = .white
         captureButton.layer.cornerRadius = 38
-        captureButton.layer.borderWidth = 5
-        captureButton.layer.borderColor = UIColor.white.withAlphaComponent(0.35).cgColor
+        captureButton.layer.borderWidth = 4
+        captureButton.layer.borderColor = UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 0.8).cgColor
+        captureButton.layer.shadowColor = UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 1).cgColor
+        captureButton.layer.shadowRadius = 14
+        captureButton.layer.shadowOpacity = 0.7
+        captureButton.layer.shadowOffset = .zero
         captureButton.addAction(UIAction { [weak self, weak captureButton] _ in
             guard let captureButton else { return }
             self?.capturePressed(captureButton)
@@ -227,11 +236,16 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     private func makeButton(title: String, imageName: String) -> UIButton {
-        var configuration = UIButton.Configuration.plain()
+        var configuration = UIButton.Configuration.filled()
         configuration.title = title
         configuration.image = UIImage(systemName: imageName)
         configuration.imagePadding = 5
         configuration.baseForegroundColor = .white
+        configuration.baseBackgroundColor = UIColor(red: 0.075, green: 0.145, blue: 0.23, alpha: 0.9)
+        configuration.cornerStyle = .capsule
+        configuration.background.strokeColor = UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 0.42)
+        configuration.background.strokeWidth = 1
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 13, bottom: 8, trailing: 13)
         let button = UIButton(configuration: configuration)
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
@@ -352,7 +366,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         recordingStartedAt = Date()
         timerLabel.text = "00:00"
         statusLabel.text = "Recording"
-        button.backgroundColor = .systemRed
+        button.backgroundColor = UIColor(red: 0.90, green: 0.22, blue: 0.43, alpha: 1)
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self, weak button] _ in
             guard let self, let started = self.recordingStartedAt else { return }
             let elapsed = Date().timeIntervalSince(started)
@@ -454,7 +468,8 @@ final class CardGuideView: UIView {
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let length = min(rect.width, rect.height) * 0.16
-        context.setStrokeColor(UIColor.white.cgColor)
+        context.setShadow(offset: .zero, blur: 8, color: UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 0.75).cgColor)
+        context.setStrokeColor(UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 1).cgColor)
         context.setLineWidth(4)
         context.setLineCap(.round)
         let corners = [
