@@ -63,14 +63,9 @@ class EzcanIPABuilder:
         outer = tk.Frame(window, bg=WHITE, padx=42, pady=30)
         outer.pack(fill="both", expand=True)
 
-        header = tk.Frame(outer, bg=WHITE)
-        header.pack(fill="x")
-        tk.Label(header, text="EZCAN", bg=WHITE, fg=INK, font=("Segoe UI", 16, "bold"), anchor="w").pack(side="left")
-        tk.Label(header, text="IOS BUILD CONSOLE", bg=WHITE, fg=MUTED, font=("Segoe UI", 9, "bold"), anchor="w").pack(side="left", padx=(12, 0), pady=(4, 0))
-        self.online = tk.Label(header, text="●  ONLINE", bg=WHITE, fg=CYAN, font=("Segoe UI", 9, "bold"))
-        self.online.pack(side="right", pady=(4, 0))
-
-        tk.Frame(outer, bg=LINE, height=1).pack(fill="x", pady=(20, 0))
+        self.top_fade = tk.Canvas(outer, height=86, bg=WHITE, highlightthickness=0)
+        self.top_fade.pack(fill="x")
+        self.top_fade.bind("<Configure>", self.paint_top_fade)
 
         dial_area = tk.Frame(outer, bg=WHITE)
         dial_area.pack(fill="both", expand=True, pady=(12, 0))
@@ -128,6 +123,24 @@ class EzcanIPABuilder:
         scrollbar.pack(side="right", fill="y")
 
         self.window.after(100, self.process_events)
+
+    def paint_top_fade(self, event=None):
+        width = max(1, event.width if event else self.top_fade.winfo_width())
+        height = max(1, self.top_fade.winfo_height())
+        start = (216, 245, 246)
+        end = (255, 255, 255)
+        self.top_fade.delete("fade")
+        bands = 24
+        for index in range(bands):
+            amount = index / max(1, bands - 1)
+            color = "#{:02x}{:02x}{:02x}".format(
+                int(start[0] + (end[0] - start[0]) * amount),
+                int(start[1] + (end[1] - start[1]) * amount),
+                int(start[2] + (end[2] - start[2]) * amount),
+            )
+            top = height * index / bands
+            bottom = height * (index + 1) / bands + 1
+            self.top_fade.create_rectangle(0, top, width, bottom, fill=color, outline="", tags="fade")
 
     def close(self):
         self.window.destroy()

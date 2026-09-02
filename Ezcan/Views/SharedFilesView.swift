@@ -15,7 +15,6 @@ struct SharedFilesView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
-                    EzcanConsoleBar(section: "FILES", statusTitle: isLoading ? "SYNCING" : "ONLINE", trailingAction: { dismiss() })
                     VStack(spacing: 14) {
                         EzcanInstrumentRing(progress: files.isEmpty ? 0.12 : 0.72, accent: EzcanTheme.blue) {
                             VStack(spacing: 5) {
@@ -68,10 +67,24 @@ struct SharedFilesView: View {
                     }
                 }
                 .padding(.horizontal, 18)
-                .padding(.vertical, 18)
+                .padding(.top, 72)
+                .padding(.bottom, 18)
             }
             .background(EzcanBackground())
             .toolbar(.hidden, for: .navigationBar)
+            .overlay(alignment: .topTrailing) {
+                Button(action: dismiss.callAsFunction) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(EzcanTheme.muted)
+                        .frame(width: 34, height: 34)
+                        .background(EzcanTheme.white.opacity(0.82), in: Circle())
+                        .overlay { Circle().stroke(EzcanTheme.line, lineWidth: 1) }
+                }
+                .accessibilityLabel("Close")
+                .padding(.top, 18)
+                .padding(.trailing, 18)
+            }
             .alert("File transfer failed", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }

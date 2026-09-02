@@ -32,9 +32,9 @@ struct EzcanBackground: View {
         ZStack {
             EzcanTheme.canvas
             LinearGradient(
-                colors: [Color.white.opacity(0.92), EzcanTheme.canvas.opacity(0.72)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                colors: [EzcanTheme.cyanSoft.opacity(0.62), Color.white.opacity(0.84), EzcanTheme.canvas.opacity(0.72)],
+                startPoint: .top,
+                endPoint: .bottom
             )
         }
         .ignoresSafeArea()
@@ -124,56 +124,6 @@ struct EzcanNavigationItem: View {
             .background(isSelected ? EzcanTheme.cyanSoft : .clear, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-}
-
-struct EzcanConsoleBar: View {
-    let section: String
-    var statusTitle: String = "ONLINE"
-    var statusColor: Color = EzcanTheme.green
-    var trailingAction: (() -> Void)? = nil
-
-    var body: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text("EZCAN")
-                    .font(.system(size: 18, weight: .black, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundStyle(EzcanTheme.ink)
-                Text(section)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(EzcanTheme.muted)
-            }
-            Spacer(minLength: 10)
-            HStack(spacing: 3) {
-                ForEach(section == "PAIR" ? ["PAIR"] : ["CAPTURE", "FILES"], id: \.self) { item in
-                    Text(item)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundStyle(item == section ? EzcanTheme.cyan : EzcanTheme.muted)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(item == section ? EzcanTheme.cyanSoft : .clear, in: Capsule())
-                }
-            }
-            .background(EzcanTheme.panelDeep, in: Capsule())
-            Spacer(minLength: 10)
-            EzcanStatusPill(title: statusTitle, color: statusColor)
-            if let trailingAction {
-                Button(action: trailingAction) {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(EzcanTheme.muted)
-                        .frame(width: 26, height: 26)
-                        .background(EzcanTheme.panelDeep, in: Circle())
-                }
-                .accessibilityLabel("Close")
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(EzcanTheme.white, in: Capsule())
-        .overlay { Capsule().stroke(EzcanTheme.line, lineWidth: 1) }
-        .shadow(color: EzcanTheme.shadow, radius: 12, y: 5)
     }
 }
 

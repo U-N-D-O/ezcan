@@ -56,6 +56,7 @@ struct CardCaptureFlowView: View {
             background
             content
                 .padding(.horizontal, 18)
+                .padding(.top, 58)
                 .frame(maxWidth: 720, maxHeight: .infinity)
         }
         .preferredColorScheme(.light)
@@ -132,39 +133,8 @@ struct CardCaptureFlowView: View {
         }
     }
 
-    private var header: some View {
-        GeometryReader { proxy in
-            appHeader(compact: proxy.size.width < 390)
-        }
-        .frame(height: 62)
-    }
-
-    private func appHeader(compact: Bool) -> some View {
-        HStack(spacing: compact ? 7 : 10) {
-            Image("ezcan_logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: compact ? 32 : 38, height: compact ? 32 : 38)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("EZCAN")
-                    .font(.system(size: compact ? 14 : 15, weight: .bold, design: .rounded))
-                    .tracking(compact ? 1.1 : 1.4)
-                    .foregroundStyle(EzcanTheme.ink)
-                Text("Card workspace")
-                    .font(.caption)
-                    .foregroundStyle(EzcanTheme.muted)
-            }
-            Spacer()
-            EzcanStatusPill(title: "ONLINE")
-        }
-        .foregroundStyle(EzcanTheme.ink)
-        .padding(.horizontal, compact ? 14 : 22)
-        .padding(.top, compact ? 8 : 12)
-    }
-
     private var preparingView: some View {
         VStack(spacing: 18) {
-            EzcanConsoleBar(section: "CAPTURE")
             Spacer()
             EzcanInstrumentRing(progress: 0.28) {
                 VStack(spacing: 8) {
@@ -191,7 +161,6 @@ struct CardCaptureFlowView: View {
     private func capturePrompt(_ stage: CaptureStage) -> some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 18) {
-                EzcanConsoleBar(section: "CAPTURE")
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("CAPTURE STAGE")
@@ -248,7 +217,6 @@ struct CardCaptureFlowView: View {
     private var optionsView: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 18) {
-                EzcanConsoleBar(section: "CAPTURE")
                 VStack(spacing: 8) {
                     Text("CARD MEDIA")
                         .font(.system(size: 28, weight: .black, design: .rounded))
@@ -359,7 +327,6 @@ struct CardCaptureFlowView: View {
     private var namingView: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 18) {
-                EzcanConsoleBar(section: "ARCHIVE")
                 EzcanInstrumentRing(progress: ArchiveCodeRules.isValid(archiveCode) ? 1 : 0.48, accent: EzcanTheme.blue) {
                     VStack(spacing: 6) {
                         Image(systemName: "barcode.viewfinder")
@@ -426,7 +393,6 @@ struct CardCaptureFlowView: View {
 
     private func completedView(_ code: String) -> some View {
         VStack(spacing: 18) {
-            EzcanConsoleBar(section: "ARCHIVE", statusTitle: "COMPLETE", statusColor: EzcanTheme.green)
             Spacer()
             EzcanInstrumentRing(progress: 1, accent: EzcanTheme.green) {
                 VStack(spacing: 6) {
@@ -466,7 +432,6 @@ struct CardCaptureFlowView: View {
 
     private func failedView(_ message: String) -> some View {
         VStack(spacing: 18) {
-            EzcanConsoleBar(section: "CAPTURE", statusTitle: "ERROR", statusColor: EzcanTheme.pink)
             Spacer()
             EzcanInstrumentRing(progress: 0.15, accent: EzcanTheme.pink) {
                 Image(systemName: "exclamationmark.triangle.fill")

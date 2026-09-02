@@ -14,7 +14,6 @@ struct PairingView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
-                    EzcanConsoleBar(section: "PAIR", statusTitle: "READY", statusColor: EzcanTheme.amber)
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .center, spacing: 18) {
                             pairingInstrument
@@ -37,7 +36,8 @@ struct PairingView: View {
                     }
                 }
                 .padding(.horizontal, 18)
-                .padding(.vertical, 18)
+                .padding(.top, 72)
+                .padding(.bottom, 18)
             }
             .background(EzcanBackground())
             .toolbar(.hidden, for: .navigationBar)
