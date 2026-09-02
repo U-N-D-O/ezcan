@@ -651,120 +651,43 @@ class DesktopWindow:
 
     def build_layout(self) -> None:
         shell = tk.Frame(self.root, bg=self.background)
-        shell.pack(fill="both", expand=True, padx=28, pady=22)
-
-        header = tk.Frame(shell, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
-        header.pack(fill="x", pady=(0, 18))
-        header.grid_columnconfigure(1, weight=1)
-
-        brand = tk.Frame(header, bg=self.panel, padx=22, pady=15)
-        brand.grid(row=0, column=0, sticky="w")
-        tk.Label(brand, text="EZCAN", bg=self.panel, fg=self.text, font=("Bahnschrift", 22, "bold")).pack(side="left")
-        tk.Label(brand, text="  CARD INTAKE", bg=self.panel, fg=self.cyan, font=("Consolas", 8, "bold")).pack(side="left", pady=(5, 0))
-        brand.bind("<ButtonPress-1>", self.begin_move)
-        brand.bind("<B1-Motion>", self.move_window)
-
-        navigation = tk.Frame(header, bg=self.panel_alt, padx=5, pady=5)
-        navigation.grid(row=0, column=1, sticky="w", padx=12)
-        for index, title in enumerate(("INTAKE", "ARCHIVE", "IPHONE")):
-            color = self.cyan if index == 0 else self.muted
-            tk.Label(
-                navigation,
-                text=title,
-                bg="#d8f5f6" if index == 0 else self.panel_alt,
-                fg=color,
-                padx=17,
-                pady=8,
-                font=("Consolas", 8, "bold"),
-            ).pack(side="left", padx=2)
-
-        status_shell = tk.Frame(header, bg=self.green, padx=1, pady=1)
-        status_shell.grid(row=0, column=2, padx=(0, 10), pady=13)
-        status = tk.Frame(status_shell, bg="#e4f8ed", padx=12, pady=8)
-        status.pack()
-        tk.Label(status, text="●", bg="#e4f8ed", fg=self.green, font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 7))
-        tk.Label(status, textvariable=self.connection_var, bg="#e4f8ed", fg="#188a55", font=("Consolas", 8, "bold")).pack(side="left")
-
-        tk.Button(
-            header,
-            text="×",
-            command=self.close,
-            bg=self.panel,
-            fg=self.muted,
-            activebackground=self.panel_alt,
-            activeforeground=self.text,
-            relief="flat",
-            bd=0,
-            font=("Segoe UI", 18),
-            cursor="hand2",
-            padx=10,
-        ).grid(row=0, column=3, padx=(0, 8))
+        shell.pack(fill="both", expand=True, padx=34, pady=30)
+        shell.bind("<ButtonPress-1>", self.begin_move)
+        shell.bind("<B1-Motion>", self.move_window)
+        self.root.bind("<Escape>", lambda _event: self.close())
 
         workspace = tk.Frame(shell, bg=self.background)
         workspace.pack(fill="both", expand=True)
-        workspace.grid_columnconfigure(0, weight=3)
-        workspace.grid_columnconfigure(1, weight=2)
-        workspace.grid_rowconfigure(0, weight=0)
+        workspace.grid_columnconfigure(0, weight=2)
+        workspace.grid_columnconfigure(1, weight=3)
+        workspace.grid_rowconfigure(0, weight=1)
         workspace.grid_rowconfigure(1, weight=0)
-        workspace.grid_rowconfigure(2, weight=1)
 
-        self.build_intake_console(workspace).grid(row=0, column=0, sticky="nsew", padx=(0, 18))
-        self.build_connection_dock(workspace).grid(row=0, column=1, sticky="nsew")
-        self.build_action_strip(workspace).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(18, 18))
-        self.build_archive_surface(workspace).grid(row=2, column=0, columnspan=2, sticky="nsew")
+        self.build_connection_dock(workspace).grid(row=0, column=0, sticky="nsew", padx=(0, 18))
+        self.build_archive_surface(workspace).grid(row=0, column=1, sticky="nsew")
+        self.build_action_strip(workspace).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(18, 0))
+
+        close_button = tk.Button(
+            shell,
+            text="CLOSE",
+            command=self.close,
+            bg=self.background,
+            fg=self.muted,
+            activebackground=self.background,
+            activeforeground=self.text,
+            relief="flat",
+            bd=0,
+            font=("Consolas", 8, "bold"),
+            cursor="hand2",
+            padx=8,
+        )
+        close_button.pack(anchor="e", pady=(18, 0))
 
     def raised_surface(self, parent: tk.Misc, accent: str | None = None) -> tuple[tk.Frame, tk.Frame]:
         shadow = tk.Frame(parent, bg="#d6e1e4", padx=4, pady=4)
         inner = tk.Frame(shadow, bg=self.panel, highlightthickness=1, highlightbackground=accent or self.border)
         inner.pack(fill="both", expand=True)
         return shadow, inner
-
-    def build_intake_console(self, parent: tk.Misc) -> tk.Frame:
-        frame, content = self.raised_surface(parent, self.cyan)
-        content.grid_columnconfigure(0, weight=1)
-        content.grid_columnconfigure(1, weight=0)
-        header = tk.Frame(content, bg=self.panel, padx=24, pady=18)
-        header.grid(row=0, column=0, columnspan=2, sticky="ew")
-        tk.Label(header, text="NEW CARD INTAKE", bg=self.panel, fg=self.text, font=("Bahnschrift", 15, "bold")).pack(side="left")
-        tk.Label(header, text="01  /  CAPTURE STATION", bg=self.panel, fg=self.cyan, font=("Consolas", 8, "bold")).pack(side="right", pady=4)
-
-        instrument = tk.Canvas(content, width=360, height=245, bg=self.panel, highlightthickness=0)
-        instrument.grid(row=1, column=0, rowspan=2, padx=(20, 0), pady=(0, 16), sticky="nsew")
-        center_x, center_y = 178, 116
-        instrument.create_oval(44, 14, 312, 282, outline="#e2ecee", width=1)
-        instrument.create_arc(58, 28, 298, 268, start=140, extent=-280, outline="#d9f5f5", width=11, style="arc")
-        instrument.create_arc(58, 28, 298, 268, start=140, extent=-205, outline=self.cyan, width=11, style="arc")
-        for angle in range(140, -141, -20):
-            import math
-            radians = math.radians(angle)
-            outer_x = center_x + 137 * math.cos(radians)
-            outer_y = center_y - 137 * math.sin(radians)
-            inner_x = center_x + 125 * math.cos(radians)
-            inner_y = center_y - 125 * math.sin(radians)
-            instrument.create_line(inner_x, inner_y, outer_x, outer_y, fill="#bdd9dc", width=2)
-        instrument.create_oval(91, 61, 265, 235, fill="#fbfdfd", outline="#dce7e9", width=1)
-        instrument.create_oval(103, 73, 253, 223, outline="#edf3f4", width=1)
-        instrument.create_text(center_x, 105, text="READY", fill=self.cyan, font=("Bahnschrift", 19, "bold"))
-        instrument.create_text(center_x, 133, text="WAITING FOR IPHONE", fill=self.muted, font=("Consolas", 8, "bold"))
-        instrument.create_text(center_x, 207, text="LIVE INTAKE MONITOR", fill=self.muted, font=("Consolas", 7))
-
-        readout = tk.Frame(content, bg=self.panel_alt, padx=18, pady=16)
-        readout.grid(row=1, column=1, padx=(0, 20), pady=(0, 8), sticky="nsew")
-        tk.Label(readout, text="STATION READOUT", bg=self.panel_alt, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w")
-        self.instrument_metric(readout, "ACTIVE INTAKES", self.active_var, self.amber)
-        self.instrument_metric(readout, "MEDIA RECEIVED", self.media_var, self.green)
-        self.instrument_metric(readout, "ARCHIVED CARDS", self.cards_var, self.blue)
-        tk.Label(content, text="Capture front, back, and optional media from the connected iPhone.", bg=self.panel, fg=self.muted, font=("Segoe UI", 9), wraplength=270, justify="left").grid(row=2, column=1, padx=(0, 20), pady=(0, 18), sticky="sw")
-        return frame
-
-    def instrument_metric(self, parent: tk.Misc, label: str, value: tk.StringVar, color: str) -> None:
-        row = tk.Frame(parent, bg=self.panel_alt)
-        row.pack(fill="x", pady=(14, 0))
-        tk.Frame(row, bg=color, width=4, height=27).pack(side="left", fill="y", padx=(0, 9))
-        text = tk.Frame(row, bg=self.panel_alt)
-        text.pack(side="left")
-        tk.Label(text, text=label, bg=self.panel_alt, fg=self.muted, font=("Consolas", 7, "bold")).pack(anchor="w")
-        tk.Label(text, textvariable=value, bg=self.panel_alt, fg=self.text, font=("Bahnschrift", 17, "bold")).pack(anchor="w")
 
     def build_connection_dock(self, parent: tk.Misc) -> tk.Frame:
         frame, content = self.raised_surface(parent, self.green)
