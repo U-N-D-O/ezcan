@@ -1,5 +1,4 @@
 import AVFoundation
-import ImageIO
 import SwiftUI
 import UIKit
 
@@ -73,7 +72,6 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private var closeUpFrames = 0
     private var standardFrames = 0
     private var nextAutomaticSwitchDate = Date.distantPast
-    private var pendingCropRect: CGRect?
     private var photoCaptureInFlight = false
 
     init(
@@ -572,23 +570,19 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private func capturePhoto() {
         guard !hasFinished, !photoCaptureInFlight else { return }
         photoCaptureInFlight = true
-        pendingCropRect = previewCropRect()
+        hasFinished = true
+        CrashReporter.shared.record("Starting photo capture")
         let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
         settings.isHighResolutionPhotoEnabled = false
         settings.photoQualityPrioritization = .quality
         if let connection = photoOutput.connection(with: .video), connection.isVideoStabilizationSupported {
             connection.preferredVideoStabilizationMode = .auto
         }
-        photoOutput.capturePhoto(with: settings, delegate: self)
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.photoOutput.capturePhoto(with: settings, delegate: self)
+        }
         updateStatus("Capturing high-quality card image...")
-    }
-
-    private func previewCropRect() -> CGRect? {
-        guard let previewLayer else { return nil }
-        let guideRect = previewView.convert(guideView.bounds, from: guideView)
-        let normalizedRect = previewLayer.metadataOutputRectConverted(fromLayerRect: guideRect)
-        guard normalizedRect.width > 0.05, normalizedRect.height > 0.05 else { return nil }
-        return normalizedRect.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
     }
 
     private func startRecording(_ button: UIButton) {
@@ -644,19 +638,19 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard error == nil, let data = photo.fileDataRepresentation() else {
             DispatchQueue.main.async { [weak self] in
+                self?.hasFinished = false
                 self?.photoCaptureInFlight = false
                 self?.updateStatus("Could not capture photo")
             }
             return
         }
-        hasFinished = true
-        let cropRect = pendingCropRect
+        CrashReporter.shared.record("Photo captured; saving JPEG")
         photoProcessingQueue.async { [weak self] in
             autoreleasepool {
                 guard let self,
-                      let jpegData = Self.processPhotoData(data, cropRect: cropRect),
-                      let url = self.save(jpegData, extension: "jpg") else {
+                      let url = self.save(data, extension: "jpg") else {
                     DispatchQueue.main.async { [weak self] in
+                        self?.hasFinished = false
                         self?.photoCaptureInFlight = false
                         self?.updateStatus("Could not process photo")
                     }
@@ -672,42 +666,6 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                 }
             }
         }
-    }
-
-    private static func processPhotoData(_ data: Data, cropRect: CGRect?) -> Data? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let image = CGImageSourceCreateThumbnailAtIndex(
-                source,
-                0,
-                [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 2400
-                ] as CFDictionary
-              ) else { return nil }
-
-        let croppedImage = crop(image, to: cropRect)
-        let output = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil) else { return nil }
-        CGImageDestinationAddImage(
-            destination,
-            croppedImage,
-            [kCGImageDestinationLossyCompressionQuality: 0.94] as CFDictionary
-        )
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return output as Data
-    }
-
-    private static func crop(_ image: CGImage, to normalizedRect: CGRect?) -> CGImage {
-        guard let normalizedRect else { return image }
-        let pixelRect = CGRect(
-            x: normalizedRect.minX * CGFloat(image.width),
-            y: normalizedRect.minY * CGFloat(image.height),
-            width: normalizedRect.width * CGFloat(image.width),
-            height: normalizedRect.height * CGFloat(image.height)
-        ).integral.intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        guard pixelRect.width > 32, pixelRect.height > 32 else { return image }
-        return image.cropping(to: pixelRect) ?? image
     }
 
     func fileOutput(

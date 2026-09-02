@@ -9,24 +9,25 @@ struct SharedFilesView: View {
     @State private var downloadingID: String?
     @State private var errorMessage: String?
     @State private var shareItem: ShareItem?
+    @State private var receivedFile: ReceivedFile?
 
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
                     EzcanConsoleBar(section: "FILES", statusTitle: isLoading ? "SYNCING" : "ONLINE", trailingAction: { dismiss() })
-                    HStack(alignment: .center, spacing: 18) {
+                    VStack(spacing: 14) {
                         EzcanInstrumentRing(progress: files.isEmpty ? 0.12 : 0.72, accent: EzcanTheme.blue) {
                             VStack(spacing: 5) {
-                                Image(systemName: "arrow.down.to.line")
-                                    .font(.system(size: 24, weight: .medium))
+                                Text("\(files.count)")
+                                    .font(.system(size: 28, weight: .black, design: .rounded))
                                     .foregroundStyle(EzcanTheme.blue)
-                                Text("FILES")
-                                    .font(.system(size: 12, weight: .black, design: .rounded))
+                                Text(files.count == 1 ? "FILE READY" : "FILES READY")
+                                    .font(.system(size: 9, weight: .black, design: .monospaced))
                                     .foregroundStyle(EzcanTheme.ink)
                             }
                         }
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(spacing: 8) {
                             Text("COMPUTER LIBRARY")
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(EzcanTheme.muted)
@@ -45,6 +46,7 @@ struct SharedFilesView: View {
                             .buttonStyle(EzcanSecondaryButtonStyle())
                             .disabled(isLoading)
                         }
+                        .multilineTextAlignment(.center)
                     }
                     .padding(20)
                     .frame(maxWidth: .infinity)
@@ -77,6 +79,16 @@ struct SharedFilesView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "The computer could not provide that file.")
+            }
+            .alert(item: $receivedFile) { file in
+                Alert(
+                    title: Text("File received"),
+                    message: Text("\(file.fileName) is ready. Open it in the Files app or dismiss this message."),
+                    primaryButton: .default(Text("Open in Files")) {
+                        shareItem = ShareItem(url: file.url)
+                    },
+                    secondaryButton: .cancel(Text("OK"))
+                )
             }
             .task { await refresh() }
             .sheet(item: $shareItem) { item in
@@ -158,7 +170,8 @@ struct SharedFilesView: View {
         downloadingID = file.id
         Task {
             do {
-                shareItem = ShareItem(url: try await LocalReceiverClient(pairing: pairing).downloadSharedFile(file))
+                let url = try await LocalReceiverClient(pairing: pairing).downloadSharedFile(file)
+                receivedFile = ReceivedFile(fileName: file.fileName, url: url)
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -180,4 +193,10 @@ private struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+private struct ReceivedFile: Identifiable {
+    let id = UUID()
+    let fileName: String
+    let url: URL
 }

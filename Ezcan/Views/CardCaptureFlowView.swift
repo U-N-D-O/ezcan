@@ -532,6 +532,7 @@ struct CardCaptureFlowView: View {
 
     private func upload(_ media: CapturedMedia, for stage: CaptureStage) {
         guard let intakeID, let pairing = pairingStore.pairing else { return }
+        CrashReporter.shared.record("Uploading \(media.fileName) to computer")
         let namedMedia = media.named(nextFileName(for: stage, original: media.fileName))
         capturedMedia.append(namedMedia)
         isBusy = true
