@@ -202,9 +202,8 @@ struct CaptureProgressButton: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(!isComplete)
-        .accessibilityLabel(isComplete ? "Continue to archive code" : "Capture progress")
-        .accessibilityHint(isComplete ? "Double tap to continue" : "Complete the remaining card media steps")
+        .accessibilityLabel(isComplete ? "Continue to archive code" : "Scan next capture stage")
+        .accessibilityHint(isComplete ? "Double tap to continue" : "Open the camera for the next missing capture")
     }
 }
 

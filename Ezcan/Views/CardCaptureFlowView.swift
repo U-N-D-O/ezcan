@@ -227,16 +227,17 @@ struct CardCaptureFlowView: View {
                 }
                 EzcanInstrumentRing(progress: captureProgress, accent: captureProgressIsComplete ? EzcanTheme.green : EzcanTheme.cyan) {
                     CaptureProgressButton(isComplete: captureProgressIsComplete) {
-                        guard captureProgressIsComplete else { return }
-                        phase = .naming
+                        advanceCapture()
                     }
                 }
                 VStack(spacing: 13) {
-                    optionButton("Additional photo", "Corners, edges, holo or defects", "plus.viewfinder", EzcanTheme.amber) {
-                        phase = .capturing(.additional)
-                    }
-                    optionButton("Surface video", "1080p HD, up to 30 seconds", "video.fill", EzcanTheme.magenta) {
-                        phase = .capturing(.video)
+                    if requiredPhotosCaptured {
+                        optionButton("Additional photo", "Corners, edges, holo or defects", "plus.viewfinder", EzcanTheme.amber) {
+                            phase = .capturing(.additional)
+                        }
+                        optionButton("Surface video", "1080p HD, up to 30 seconds", "video.fill", EzcanTheme.magenta) {
+                            phase = .capturing(.video)
+                        }
                     }
                     optionButton("Files from computer", "Download an IPA or other shared file", "arrow.down.circle.fill", EzcanTheme.green) {
                         sharedFilesPresented = true
@@ -244,6 +245,7 @@ struct CardCaptureFlowView: View {
                     optionButton("Next", "Choose the archive code", "arrow.right.circle.fill", EzcanTheme.blue) {
                         phase = .naming
                     }
+                    .disabled(!requiredPhotosCaptured)
                 }
                 .frame(maxWidth: 520)
                 if let statusMessage {
@@ -284,6 +286,36 @@ struct CardCaptureFlowView: View {
 
     private var captureProgressIsComplete: Bool {
         captureProgress >= 1
+    }
+
+    private var requiredPhotosCaptured: Bool {
+        capturedMedia.contains { $0.fileName.lowercased().hasPrefix("front") }
+            && capturedMedia.contains { $0.fileName.lowercased().hasPrefix("back") }
+    }
+
+    private var nextCaptureStage: CaptureStage? {
+        if !capturedMedia.contains(where: { $0.fileName.lowercased().hasPrefix("front") }) {
+            return .front
+        }
+        if !capturedMedia.contains(where: { $0.fileName.lowercased().hasPrefix("back") }) {
+            return .back
+        }
+        let additionalCount = capturedMedia.filter { $0.fileName.lowercased().hasPrefix("additional") }.count
+        if additionalCount < 2 {
+            return .additional
+        }
+        if !capturedMedia.contains(where: { $0.kind == .video }) {
+            return .video
+        }
+        return nil
+    }
+
+    private func advanceCapture() {
+        if captureProgressIsComplete {
+            phase = .naming
+        } else if let nextCaptureStage {
+            phase = .capturing(nextCaptureStage)
+        }
     }
 
     private func summaryMetric(value: String, label: String, color: Color) -> some View {
