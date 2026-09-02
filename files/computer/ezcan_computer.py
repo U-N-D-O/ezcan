@@ -132,12 +132,12 @@ def card_action_availability(status: str | None, has_draft: bool) -> dict[str, b
     if status is None or status == "recovery_required":
         return {key: False for key in ("search", "match", "identity", "pricing", "make_draft", "review_draft")}
     return {
-        "search": status in {"received", "searching", "identified"},
-        "match": status in {"searching", "identified"},
-        "identity": status in {"searching", "identified"},
-        "pricing": status == "identified",
-        "make_draft": status == "identified" and not has_draft,
-        "review_draft": status == "identified" and has_draft,
+        "search": status in {"received", "searching", "identified", "researched"},
+        "match": status in {"searching", "identified", "researched"},
+        "identity": status in {"searching", "identified", "researched"},
+        "pricing": status in {"identified", "researched"},
+        "make_draft": status in {"identified", "researched"} and not has_draft,
+        "review_draft": status in {"identified", "researched"} and has_draft,
     }
 
 
@@ -738,6 +738,10 @@ class Store:
                 "UPDATE ebay_searches SET status = 'candidate_recorded' WHERE search_id = ?",
                 (search_id,),
             )
+            connection.execute(
+                "UPDATE cards SET status = 'identified', updated_at = ? WHERE archive_code = ? AND status = 'researched'",
+                (utc_now(), search["archive_code"]),
+            )
             return int(cursor.lastrowid)
 
     def ebay_candidates(self, archive_code: str) -> list[sqlite3.Row]:
@@ -751,15 +755,27 @@ class Store:
         card = self.card_by_archive_code(archive_code)
         if card is None:
             raise ValueError("Card was not found")
-        if card["status"] != "identified":
+        if card["status"] not in {"identified", "researched"}:
             raise ValueError("Confirm the card identity before calculating pricing")
         return recommend_price(dict(candidate) for candidate in self.ebay_candidates(archive_code))
+
+    def mark_prices_researched(self, archive_code: str) -> None:
+        card = self.card_by_archive_code(archive_code)
+        if card is None:
+            raise ValueError("Card was not found")
+        if card["status"] not in {"identified", "researched"}:
+            raise ValueError("Confirm the card identity before recording pricing research")
+        with self.connection() as connection:
+            connection.execute(
+                "UPDATE cards SET status = 'researched', updated_at = ? WHERE archive_code = ?",
+                (utc_now(), archive_code),
+            )
 
     def create_listing_draft(self, archive_code: str) -> Path:
         card = self.card_by_archive_code(archive_code)
         if card is None:
             raise ValueError("Card was not found")
-        if card["status"] != "identified":
+        if card["status"] not in {"identified", "researched"}:
             raise ValueError("Confirm the card identity before creating a listing draft")
         recommendation = self.market_recommendation(archive_code)
         card_folder = Path(card["folder_path"])
@@ -1672,6 +1688,8 @@ class DesktopWindow:
         if state == "searching":
             return "Add match"
         if state == "identified":
+            return "Review draft" if self.store.latest_listing_draft(str(card["archive_code"])) else "Research prices"
+        if state == "researched":
             return "Review draft" if self.store.latest_listing_draft(str(card["archive_code"])) else "Make draft"
         return state.replace("_", " ").title()
 
@@ -1978,6 +1996,8 @@ class DesktopWindow:
         except ValueError as error:
             messagebox.showinfo("Research Prices", str(error))
             return
+        self.store.mark_prices_researched(archive_code)
+        self.refresh()
 
         dialog = tk.Toplevel(self.root)
         dialog.title(f"Research Prices - {archive_code}")

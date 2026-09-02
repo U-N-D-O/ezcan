@@ -49,6 +49,8 @@ def test_card_action_availability_follows_workflow_state() -> None:
     assert card_action_availability("searching", False)["pricing"] is False
     assert card_action_availability("identified", False)["make_draft"] is True
     assert card_action_availability("identified", False)["pricing"] is True
+    assert card_action_availability("researched", False)["pricing"] is True
+    assert card_action_availability("researched", False)["make_draft"] is True
     assert card_action_availability("identified", True)["review_draft"] is True
     assert card_action_availability("identified", True)["make_draft"] is False
     assert card_action_availability("recovery_required", False)["search"] is False
@@ -587,6 +589,23 @@ def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path)
     assert confirmed_card["card_number"] == "4/102"
     assert confirmed_card["printing"] == "Holo"
     assert confirmed_search["status"] == "identity_confirmed"
+
+    app.state.store.market_recommendation(archive_code)
+    app.state.store.mark_prices_researched(archive_code)
+    researched_card = app.state.store.card_by_archive_code(archive_code)
+    assert researched_card["status"] == "researched"
+    app.state.store.add_ebay_candidate(
+        search_id,
+        {
+            "market_status": "active",
+            "title": "Current Charizard listing",
+            "item_url": "https://www.ebay.com/itm/789",
+            "price": "120",
+            "shipping_price": "34",
+        },
+    )
+    assert app.state.store.card_by_archive_code(archive_code)["status"] == "identified"
+    app.state.store.mark_prices_researched(archive_code)
 
     draft_path = app.state.store.create_listing_draft(archive_code)
     draft = json.loads(draft_path.read_text(encoding="utf-8"))
