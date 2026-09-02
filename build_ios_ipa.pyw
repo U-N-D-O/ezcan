@@ -8,13 +8,21 @@ import time
 import tkinter as tk
 from datetime import datetime, timezone
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 
 
 ROOT = Path(__file__).resolve().parent
 WORKFLOW = "build-ios.yml"
 ARTIFACT_NAME = "ezcan-ios-ipa"
-DEFAULT_TIMEOUT_MINUTES = 45
+BUILD_TIMEOUT_MINUTES = 45
+WHITE = "#f4f7f8"
+INK = "#26363d"
+MUTED = "#8b9aa1"
+CYAN = "#14c9d6"
+CYAN_PALE = "#d8f5f6"
+GREEN = "#4bd18c"
+GREEN_PALE = "#e3f9ed"
+LINE = "#d9e2e5"
 
 
 class PipelineError(RuntimeError):
@@ -27,71 +35,91 @@ class EzcanIPABuilder:
         self.events = queue.Queue()
         self.worker = None
 
-        window.title("Ezcan IPA Builder")
-        window.geometry("720x520")
-        window.minsize(620, 440)
-        window.configure(bg="#071323")
+        window.title("Ezcan / Build Console")
+        window.geometry("760x720")
+        window.minsize(620, 620)
+        window.configure(bg=WHITE)
 
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TFrame", background="#071323")
-        style.configure("TLabel", background="#071323", foreground="#edf7ff")
-        style.configure("Muted.TLabel", background="#071323", foreground="#8ba6bc")
-        style.configure("Title.TLabel", background="#071323", foreground="#39e5d4", font=("Segoe UI", 19, "bold"))
-        style.configure("TButton", padding=(12, 8))
-        style.configure("Accent.TButton", background="#20c7bb", foreground="#031417")
-        style.map("Accent.TButton", background=[("active", "#55f0df")])
-        style.configure("Horizontal.TProgressbar", troughcolor="#142b40", background="#39e5d4", lightcolor="#39e5d4", darkcolor="#39e5d4")
-
-        outer = ttk.Frame(window, padding=22)
+        outer = tk.Frame(window, bg=WHITE, padx=42, pady=30)
         outer.pack(fill="both", expand=True)
 
-        ttk.Label(outer, text="EZCAN IPA BUILDER", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(outer, text="Double-click workflow runner for the unsigned iOS build", style="Muted.TLabel").pack(anchor="w", pady=(2, 18))
+        header = tk.Frame(outer, bg=WHITE)
+        header.pack(fill="x")
+        tk.Label(header, text="EZCAN", bg=WHITE, fg=INK, font=("Segoe UI", 16, "bold"), anchor="w").pack(side="left")
+        tk.Label(header, text="IOS BUILD CONSOLE", bg=WHITE, fg=MUTED, font=("Segoe UI", 9, "bold"), anchor="w").pack(side="left", padx=(12, 0), pady=(4, 0))
+        self.online = tk.Label(header, text="●  ONLINE", bg=WHITE, fg=CYAN, font=("Segoe UI", 9, "bold"))
+        self.online.pack(side="right", pady=(4, 0))
 
-        options = ttk.Frame(outer)
-        options.pack(fill="x", pady=(0, 14))
-        ttk.Label(options, text="Commit message").grid(row=0, column=0, sticky="w")
-        self.commit_message = ttk.Entry(options)
-        self.commit_message.insert(0, "Build latest Ezcan IPA")
-        self.commit_message.grid(row=1, column=0, sticky="ew", padx=(0, 14), pady=(5, 0))
-        ttk.Label(options, text="Build timeout (minutes)").grid(row=0, column=1, sticky="w")
-        self.timeout = ttk.Spinbox(options, from_=5, to=180, width=8)
-        self.timeout.set(str(DEFAULT_TIMEOUT_MINUTES))
-        self.timeout.grid(row=1, column=1, sticky="w", pady=(5, 0))
-        options.columnconfigure(0, weight=1)
+        tk.Frame(outer, bg=LINE, height=1).pack(fill="x", pady=(20, 0))
 
-        self.status = ttk.Label(outer, text="Ready. Changes will be committed and pushed automatically.", style="Muted.TLabel")
-        self.status.pack(anchor="w", pady=(0, 7))
-        self.progress = ttk.Progressbar(outer, mode="determinate", maximum=100, style="Horizontal.TProgressbar")
-        self.progress.pack(fill="x", pady=(0, 14))
+        dial_area = tk.Frame(outer, bg=WHITE)
+        dial_area.pack(fill="both", expand=True, pady=(12, 0))
+        self.dial = tk.Canvas(dial_area, width=330, height=330, bg=WHITE, highlightthickness=0)
+        self.dial.pack(pady=(0, 0))
+        self.dial.create_oval(32, 32, 298, 298, outline="#e4eaec", width=1)
+        self.dial.create_arc(46, 46, 284, 284, start=90, extent=-360, outline=CYAN_PALE, width=8, style="arc")
+        self.dial.create_oval(63, 63, 267, 267, outline=LINE, width=1)
+        self.dial_arc = self.dial.create_arc(46, 46, 284, 284, start=90, extent=0, outline=CYAN, width=8, style="arc")
+        self.dial_percent = self.dial.create_text(165, 143, text="0%", fill=INK, font=("Segoe UI", 30, "bold"))
+        self.dial_state = self.dial.create_text(165, 184, text="READY", fill=CYAN, font=("Segoe UI", 10, "bold"))
+        self.dial_detail = self.dial.create_text(165, 207, text="SYSTEM STANDBY", fill=MUTED, font=("Segoe UI", 8))
 
-        log_frame = ttk.Frame(outer)
-        log_frame.pack(fill="both", expand=True)
+        self.status = tk.Label(outer, text="Ready to build the latest unsigned IPA", bg=WHITE, fg=INK, font=("Segoe UI", 12))
+        self.status.pack(pady=(0, 8))
+        self.progress = tk.Canvas(outer, height=5, bg=CYAN_PALE, highlightthickness=0)
+        self.progress.pack(fill="x", pady=(0, 18))
+        self.progress_fill = self.progress.create_rectangle(0, 0, 0, 5, fill=CYAN, outline="")
+
+        activation_row = tk.Frame(outer, bg=WHITE)
+        activation_row.pack(pady=(0, 20))
+        self.activate_button = tk.Canvas(activation_row, width=230, height=86, bg=WHITE, highlightthickness=0, cursor="hand2")
+        self.activate_button.pack()
+        self.activate_button.create_oval(12, 8, 218, 78, fill=GREEN_PALE, outline=GREEN, width=1)
+        self.activate_icon = self.activate_button.create_text(50, 43, text="\u23fb", fill=GREEN, font=("Segoe UI Symbol", 25, "bold"))
+        self.activate_label = self.activate_button.create_text(132, 43, text="ACTIVATE BUILD", fill=GREEN, font=("Segoe UI", 11, "bold"))
+        self.activate_button.bind("<Button-1>", lambda _event: self.start())
+        self.activate_button.bind("<Enter>", lambda _event: self.activate_button.itemconfigure(self.activate_icon, fill="#22b970"))
+        self.activate_button.bind("<Leave>", lambda _event: self.activate_button.itemconfigure(self.activate_icon, fill=GREEN))
+
+        log_header = tk.Frame(outer, bg=WHITE)
+        log_header.pack(fill="x")
+        tk.Label(log_header, text="ACTIVITY", bg=WHITE, fg=MUTED, font=("Segoe UI", 8, "bold"), anchor="w").pack(side="left")
+        tk.Label(log_header, text="OUTPUT  /  artifacts\\ios", bg=WHITE, fg=MUTED, font=("Segoe UI", 8), anchor="e").pack(side="right")
+        log_frame = tk.Frame(outer, bg=WHITE, highlightbackground=LINE, highlightthickness=1)
+        log_frame.pack(fill="both", expand=False, pady=(7, 0))
         self.log = tk.Text(
             log_frame,
-            height=14,
+            height=7,
             state="disabled",
             wrap="word",
-            bg="#0b1c2d",
-            fg="#d7e8f3",
-            insertbackground="#d7e8f3",
+            bg="#fbfcfc",
+            fg="#60747c",
+            insertbackground=INK,
             relief="flat",
-            padx=12,
-            pady=10,
+            padx=14,
+            pady=12,
+            font=("Consolas", 9),
         )
-        scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
+        scrollbar = tk.Scrollbar(log_frame, orient="vertical", command=self.log.yview, bg=WHITE, troughcolor=WHITE, relief="flat", highlightthickness=0)
         self.log.configure(yscrollcommand=scrollbar.set)
         self.log.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        bottom = ttk.Frame(outer)
-        bottom.pack(fill="x", pady=(16, 0))
-        ttk.Label(bottom, text="IPA output: artifacts\\ios", style="Muted.TLabel").pack(side="left")
-        self.start_button = ttk.Button(bottom, text="Build and download IPA", style="Accent.TButton", command=self.start)
-        self.start_button.pack(side="right")
-
         self.window.after(100, self.process_events)
+
+    def update_dial(self, percent, state, detail):
+        self.dial.itemconfigure(self.dial_arc, extent=-3.6 * percent)
+        self.dial.itemconfigure(self.dial_percent, text="{}%".format(int(percent)))
+        self.dial.itemconfigure(self.dial_state, text=state)
+        self.dial.itemconfigure(self.dial_detail, text=detail)
+        width = max(0, self.progress.winfo_width())
+        self.progress.coords(self.progress_fill, 0, 0, width * percent / 100, 5)
+
+    def set_activation_state(self, active):
+        color = MUTED if active else GREEN
+        self.activate_button.configure(cursor="watch" if active else "hand2")
+        self.activate_button.itemconfigure(self.activate_icon, fill=color)
+        self.activate_button.itemconfigure(self.activate_label, fill=color)
 
     def write_log(self, message):
         self.events.put(("log", message))
@@ -102,20 +130,11 @@ class EzcanIPABuilder:
     def start(self):
         if self.worker and self.worker.is_alive():
             return
-        commit_message = self.commit_message.get().strip() or "Build latest Ezcan IPA"
-        try:
-            timeout = int(self.timeout.get())
-        except ValueError:
-            messagebox.showerror("Invalid timeout", "Build timeout must be a number of minutes.")
-            return
-        if timeout < 5 or timeout > 180:
-            messagebox.showerror("Invalid timeout", "Build timeout must be between 5 and 180 minutes.")
-            return
-
-        self.start_button.configure(state="disabled")
-        self.progress.configure(value=0)
+        self.set_activation_state(True)
+        self.update_dial(0, "ACTIVE", "CONNECTING")
+        self.status.configure(text="Starting secure build sequence")
         self.append_log("Starting Ezcan IPA build...")
-        self.worker = threading.Thread(target=self.run_pipeline, args=(commit_message, timeout), daemon=True)
+        self.worker = threading.Thread(target=self.run_pipeline, args=("Build latest Ezcan IPA", BUILD_TIMEOUT_MINUTES), daemon=True)
         self.worker.start()
 
     def append_log(self, message):
@@ -131,18 +150,38 @@ class EzcanIPABuilder:
                 if event[0] == "log":
                     self.append_log(event[1])
                 elif event[0] == "progress":
-                    self.progress.configure(value=event[1])
-                    self.status.configure(text=event[2])
+                    percent = event[1]
+                    message = event[2]
+                    self.update_dial(percent, "ACTIVE", self.dial_detail_text(message))
+                    self.status.configure(text=message)
                 elif event[0] == "success":
-                    self.start_button.configure(state="normal")
-                    self.progress.configure(value=100)
+                    self.set_activation_state(False)
+                    self.update_dial(100, "COMPLETE", "IPA READY")
+                    self.status.configure(text="IPA downloaded and ready for AltStore")
                     messagebox.showinfo("Ezcan IPA build complete", event[1])
                 elif event[0] == "failure":
-                    self.start_button.configure(state="normal")
+                    self.set_activation_state(False)
+                    self.update_dial(0, "ERROR", "CHECK ACTIVITY")
+                    self.status.configure(text="Build stopped. See activity for details.")
                     messagebox.showerror("Ezcan IPA build failed", event[1])
         except queue.Empty:
             pass
         self.window.after(100, self.process_events)
+
+    @staticmethod
+    def dial_detail_text(message):
+        upper = message.upper()
+        if "PUSH" in upper:
+            return "PUSHING MAIN"
+        if "TRACKING" in upper or "ACTIONS" in upper:
+            return "ACTIONS RUNNING"
+        if "DOWNLOAD" in upper:
+            return "DOWNLOADING"
+        if "WAITING" in upper:
+            return "QUEUEING"
+        if "CHECK" in upper:
+            return "SYSTEM CHECK"
+        return "BUILDING"
 
     def run_command(self, command, label, quiet=False):
         if not quiet:

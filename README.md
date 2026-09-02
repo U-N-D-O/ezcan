@@ -40,7 +40,7 @@ The workflow at `.github/workflows/build-ios.yml` builds an arm64 iOS IPA on eve
 
 ### One-command IPA build
 
-The easiest Windows option is the double-clickable Python GUI [build_ios_ipa.pyw](build_ios_ipa.pyw). It needs only Python, Git, and the GitHub CLI. Double-click the file, press **Build and download IPA**, and it will show a progress bar and log while it commits/pushes changes, runs the macOS build, downloads the `ezcan-ios-ipa` artifact, and displays a completion alert. Authenticate the GitHub CLI once with `gh auth login`.
+The easiest Windows option is the double-clickable Python GUI [build_ios_ipa.pyw](build_ios_ipa.pyw). It needs only Python, Git, and the GitHub CLI. Double-click the file, press **ACTIVATE BUILD**, and it will show a progress dial and activity log while it commits/pushes changes, runs the macOS build, downloads the `ezcan-ios-ipa` artifact, and displays a completion alert. Authenticate the GitHub CLI once with `gh auth login`.
 
 The downloaded `Ezcan-unsigned.ipa` is placed under `artifacts\ios`. When the worktree is clean, the GUI starts a manual build of the current `main` automatically.
 
