@@ -66,7 +66,7 @@ struct PairingView: View {
         let isOffline = networkMonitor.isOffline
         let accent = isOffline ? EzcanTheme.pink : EzcanTheme.cyan
 
-        VStack(spacing: 14) {
+        return VStack(spacing: 14) {
             EzcanInstrumentRing(progress: isOffline ? 1.0 / 3.0 : 2.0 / 3.0, accent: accent) {
                 VStack(spacing: 6) {
                     Image(systemName: isOffline ? "wifi.slash" : "antenna.radiowaves.left.and.right")
