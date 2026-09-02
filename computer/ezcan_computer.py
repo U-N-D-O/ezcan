@@ -521,7 +521,6 @@ class DesktopWindow:
         self.qr_photo: tk.PhotoImage | None = None
         self.tree: ttk.Treeview
         self.build_styles()
-        self.build_background()
         self.build_layout()
         self.refresh()
 
@@ -651,37 +650,21 @@ class DesktopWindow:
 
     def build_layout(self) -> None:
         shell = tk.Frame(self.root, bg=self.background)
-        shell.pack(fill="both", expand=True, padx=34, pady=30)
+        shell.pack(fill="both", expand=True, padx=42, pady=34)
         shell.bind("<ButtonPress-1>", self.begin_move)
         shell.bind("<B1-Motion>", self.move_window)
         self.root.bind("<Escape>", lambda _event: self.close())
 
         workspace = tk.Frame(shell, bg=self.background)
         workspace.pack(fill="both", expand=True)
-        workspace.grid_columnconfigure(0, weight=2)
+        workspace.grid_columnconfigure(0, weight=5)
         workspace.grid_columnconfigure(1, weight=3)
         workspace.grid_rowconfigure(0, weight=1)
         workspace.grid_rowconfigure(1, weight=0)
 
-        self.build_connection_dock(workspace).grid(row=0, column=0, sticky="nsew", padx=(0, 18))
+        self.build_connection_dock(workspace).grid(row=0, column=0, sticky="nsew", padx=(0, 42))
         self.build_archive_surface(workspace).grid(row=0, column=1, sticky="nsew")
-        self.build_action_strip(workspace).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(18, 0))
-
-        close_button = tk.Button(
-            shell,
-            text="CLOSE",
-            command=self.close,
-            bg=self.background,
-            fg=self.muted,
-            activebackground=self.background,
-            activeforeground=self.text,
-            relief="flat",
-            bd=0,
-            font=("Consolas", 8, "bold"),
-            cursor="hand2",
-            padx=8,
-        )
-        close_button.pack(anchor="e", pady=(18, 0))
+        self.build_action_strip(workspace).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(30, 0))
 
     def raised_surface(self, parent: tk.Misc, accent: str | None = None) -> tuple[tk.Frame, tk.Frame]:
         shadow = tk.Frame(parent, bg="#d6e1e4", padx=4, pady=4)
@@ -690,12 +673,17 @@ class DesktopWindow:
         return shadow, inner
 
     def build_connection_dock(self, parent: tk.Misc) -> tk.Frame:
-        frame, content = self.raised_surface(parent, self.green)
-        tk.Label(content, text="PAIR IPHONE", bg=self.panel, fg=self.text, font=("Bahnschrift", 15, "bold")).pack(anchor="w", padx=22, pady=(18, 3))
-        tk.Label(content, text="Scan to connect to this capture station", bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(anchor="w", padx=22)
-        qr_shell = tk.Frame(content, bg=self.cyan, padx=5, pady=5)
-        qr_shell.pack(padx=22, pady=17)
-        qr_frame = tk.Frame(qr_shell, bg="#ffffff", width=220, height=220)
+        frame = tk.Frame(parent, bg=self.background)
+        content = tk.Frame(frame, bg=self.background)
+        content.pack(fill="both", expand=True)
+        tk.Label(content, text="01", bg=self.background, fg=self.cyan, font=("Bahnschrift", 28, "bold")).pack(anchor="w")
+        tk.Label(content, text="PAIR YOUR IPHONE", bg=self.background, fg=self.text, font=("Bahnschrift", 26, "bold")).pack(anchor="w", pady=(2, 5))
+        tk.Label(content, text="Use the Ezcan camera to join this workbench.", bg=self.background, fg=self.muted, font=("Segoe UI", 10)).pack(anchor="w")
+        rule = tk.Frame(content, bg=self.cyan, height=3)
+        rule.pack(fill="x", pady=(22, 18))
+        qr_shell = tk.Frame(content, bg=self.text, padx=10, pady=10)
+        qr_shell.pack(anchor="w", pady=(0, 18))
+        qr_frame = tk.Frame(qr_shell, bg="#ffffff", width=238, height=238)
         qr_frame.pack()
         qr_frame.pack_propagate(False)
         payload = json.dumps({"protocol": "ezcan", "version": 1, "url": self.address, "token": self.application.state.token, "computerName": socket.gethostname()}, separators=(",", ":"))
@@ -704,20 +692,29 @@ class DesktopWindow:
         image.save(buffer, format="PNG")
         self.qr_photo = tk.PhotoImage(data=base64.b64encode(buffer.getvalue()).decode("ascii"))
         tk.Label(qr_frame, image=self.qr_photo, bg="#ffffff").place(relx=0.5, rely=0.5, anchor="center")
-        tk.Label(content, text="COMPUTER ADDRESS", bg=self.panel, fg=self.muted, font=("Consolas", 7, "bold")).pack(anchor="w", padx=22)
-        address_label = tk.Label(content, textvariable=self.address_var, bg=self.panel, fg=self.text, font=("Consolas", 8), cursor="hand2")
-        address_label.pack(anchor="w", padx=22, pady=(4, 10))
+        address_label = tk.Label(content, textvariable=self.address_var, bg=self.background, fg=self.text, font=("Consolas", 10), cursor="hand2")
+        address_label.pack(anchor="w", pady=(0, 5))
         address_label.bind("<Button-1>", lambda _event: self.copy_text(self.address))
-        self.rounded_button(content, "COPY ADDRESS", lambda: self.copy_text(self.address), 136, self.cyan, "#71dfe3", foreground=self.text).pack(anchor="w", padx=22, pady=(0, 18))
+        tk.Label(content, text="Tap the address to copy it", bg=self.background, fg=self.muted, font=("Segoe UI", 8)).pack(anchor="w")
         return frame
 
     def build_action_strip(self, parent: tk.Misc) -> tk.Frame:
         strip = tk.Frame(parent, bg=self.background)
         strip.grid_columnconfigure(0, weight=1)
         strip.grid_columnconfigure(1, weight=1)
-        self.action_tile(strip, 0, "ARCHIVE LOCATION", self.archive_var, "OPEN ARCHIVE", self.open_archive, self.blue, "⌂")
-        self.action_tile(strip, 1, "SEND TO IPHONE", self.transfer_var, "CHOOSE FILE", self.choose_file_for_iphone, self.magenta, "↑")
+        self.action_line(strip, 0, "ARCHIVE", self.archive_var, "OPEN", self.open_archive, self.blue)
+        self.action_line(strip, 1, "SEND TO IPHONE", self.transfer_var, "CHOOSE", self.choose_file_for_iphone, self.magenta)
         return strip
+
+    def action_line(self, parent: tk.Misc, column: int, title: str, value: tk.StringVar, button_text: str, command, accent: str) -> None:
+        line = tk.Frame(parent, bg=self.background)
+        line.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 22, 22 if column == 0 else 0))
+        tk.Frame(line, bg=accent, width=4, height=46).pack(side="left", fill="y", padx=(0, 14))
+        details = tk.Frame(line, bg=self.background)
+        details.pack(side="left", fill="x", expand=True)
+        tk.Label(details, text=title, bg=self.background, fg=accent, font=("Consolas", 8, "bold")).pack(anchor="w")
+        tk.Label(details, textvariable=value, bg=self.background, fg=self.text, font=("Segoe UI", 9), anchor="w").pack(anchor="w", pady=(4, 0))
+        self.rounded_button(line, button_text, command, 92, accent, accent, foreground=self.text).pack(side="right", pady=4)
 
     def action_tile(self, parent: tk.Misc, column: int, title: str, value: tk.StringVar, button_text: str, command, accent: str, icon: str) -> None:
         frame, content = self.raised_surface(parent, accent)
@@ -730,13 +727,13 @@ class DesktopWindow:
         self.rounded_button(content, button_text, command, 126, accent, accent, foreground=self.text).pack(side="right", padx=14, pady=10)
 
     def build_archive_surface(self, parent: tk.Misc) -> tk.Frame:
-        frame, content = self.raised_surface(parent)
-        heading = tk.Frame(content, bg=self.panel, padx=20, pady=15)
-        heading.pack(fill="x")
-        tk.Label(heading, text="RECENT ARCHIVE ACTIVITY", bg=self.panel, fg=self.text, font=("Bahnschrift", 13, "bold")).pack(side="left")
-        tk.Label(heading, textvariable=self.updated_var, bg=self.panel, fg=self.muted, font=("Consolas", 8)).pack(side="right", pady=3)
-        table_frame = tk.Frame(content, bg=self.panel_deep, highlightthickness=1, highlightbackground=self.border)
-        table_frame.pack(fill="both", expand=True, padx=14, pady=(0, 14))
+        frame = tk.Frame(parent, bg=self.background)
+        content = tk.Frame(frame, bg=self.background)
+        content.pack(fill="both", expand=True)
+        tk.Label(content, text="RECENT ACTIVITY", bg=self.background, fg=self.text, font=("Bahnschrift", 18, "bold")).pack(anchor="w")
+        tk.Label(content, textvariable=self.updated_var, bg=self.background, fg=self.muted, font=("Consolas", 8)).pack(anchor="w", pady=(4, 16))
+        table_frame = tk.Frame(content, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        table_frame.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(table_frame, columns=("code", "status", "folder", "created"), show="headings", style="Ezcan.Treeview")
         headings = {"code": "ARCHIVE CODE", "status": "STATUS", "folder": "FOLDER", "created": "RECEIVED"}
         widths = {"code": 130, "status": 120, "folder": 300, "created": 150}
@@ -899,7 +896,6 @@ class DesktopWindow:
         tk.Label(heading, text="RECENT ARCHIVE ACTIVITY", bg=self.panel, fg=self.cyan, font=("Consolas", 11)).pack(side="left")
         tk.Label(heading, textvariable=self.updated_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(side="right")
         table_frame = tk.Frame(frame, bg=self.panel_deep, highlightthickness=1, highlightbackground=self.border)
-        table_frame.pack(fill="both", expand=True, padx=14, pady=(0, 14))
         self.tree = ttk.Treeview(
             table_frame,
             columns=("code", "status", "folder", "created"),
