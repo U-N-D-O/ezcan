@@ -761,6 +761,17 @@ def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path)
     app.state.store.set_listing_status(archive_code, "rejected")
     assert app.state.store.latest_listing_draft(archive_code)["status"] == "rejected"
 
+    regenerated_path = app.state.store.create_listing_draft(archive_code)
+    regenerated_listing = app.state.store.latest_listing_draft(archive_code)
+    assert regenerated_path == draft_path
+    assert regenerated_listing["listing_id"] == listing["listing_id"]
+    assert regenerated_listing["status"] == "draft"
+    with app.state.store.connection() as connection:
+        listing_count = connection.execute(
+            "SELECT COUNT(*) FROM listings WHERE archive_code = ?", (archive_code,)
+        ).fetchone()[0]
+    assert listing_count == 1
+
     (Path(card["folder_path"]) / "manifest.json").unlink()
     Store(app.state.store.root)
     assert (Path(card["folder_path"]) / "manifest.json").is_file()

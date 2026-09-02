@@ -852,24 +852,41 @@ class Store:
         draft_path = card_folder / "generated" / "listing-draft.json"
         draft_path.parent.mkdir(parents=True, exist_ok=True)
         draft_path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
-        listing_id = str(uuid.uuid4())
+        existing_listing = self.latest_listing_draft(archive_code)
+        created_at = utc_now()
         with self.connection() as connection:
-            connection.execute(
-                """INSERT INTO listings (
-                    listing_id, internal_id, archive_code, status, draft_path,
-                    suggested_price_low, suggested_price_high, shipping_price, created_at
-                ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)""",
-                (
-                    listing_id,
-                    card["internal_id"],
-                    archive_code,
-                    str(draft_path),
-                    float(recommendation.suggested_item_low),
-                    float(recommendation.suggested_item_high),
-                    float(recommendation.owner_shipping_charge),
-                    utc_now(),
-                ),
-            )
+            if existing_listing is None:
+                connection.execute(
+                    """INSERT INTO listings (
+                        listing_id, internal_id, archive_code, status, draft_path,
+                        suggested_price_low, suggested_price_high, shipping_price, created_at
+                    ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)""",
+                    (
+                        str(uuid.uuid4()),
+                        card["internal_id"],
+                        archive_code,
+                        str(draft_path),
+                        float(recommendation.suggested_item_low),
+                        float(recommendation.suggested_item_high),
+                        float(recommendation.owner_shipping_charge),
+                        created_at,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """UPDATE listings
+                    SET status = 'draft', draft_path = ?, suggested_price_low = ?,
+                        suggested_price_high = ?, shipping_price = ?, created_at = ?
+                    WHERE listing_id = ?""",
+                    (
+                        str(draft_path),
+                        float(recommendation.suggested_item_low),
+                        float(recommendation.suggested_item_high),
+                        float(recommendation.owner_shipping_charge),
+                        created_at,
+                        existing_listing["listing_id"],
+                    ),
+                )
         return draft_path
 
     def latest_listing_draft(self, archive_code: str) -> sqlite3.Row | None:
