@@ -1991,6 +1991,28 @@ class DesktopWindow:
         candidate_scrollbar.pack(side="right", fill="y")
         candidate_tree.configure(yscrollcommand=candidate_scrollbar.set)
 
+        def open_candidate() -> None:
+            selected_candidate = candidate_tree.selection()
+            if not selected_candidate:
+                messagebox.showinfo("Open eBay Listing", "Select a saved comparable first.", parent=dialog)
+                return
+            values = candidate_tree.item(selected_candidate[0], "values")
+            item_url = str(values[5]) if len(values) > 5 else ""
+            if not item_url:
+                messagebox.showinfo("Open eBay Listing", "That comparable has no saved listing URL.", parent=dialog)
+                return
+            opener = self.ebay_account.open_url if self.ebay_account.state()["status"] == "connected" else webbrowser.open_new_tab
+            try:
+                if not opener(item_url):
+                    raise OSError("The browser could not be opened")
+            except OSError as error:
+                messagebox.showerror("Open eBay Listing", f"Could not open that listing.\n\n{error}", parent=dialog)
+
+        candidate_tree.bind("<Double-1>", lambda _event: open_candidate())
+        candidate_buttons = tk.Frame(body, bg=self.panel)
+        candidate_buttons.pack(fill="x", pady=(6, 0))
+        tk.Button(candidate_buttons, text="OPEN LISTING", command=open_candidate).pack(anchor="e")
+
         identity = tk.Frame(body, bg=self.panel)
         identity.pack(fill="x", pady=(20, 0))
         fields = {
