@@ -28,6 +28,16 @@ def test_ebay_account_profile_stores_state_without_credentials(tmp_path: Path) -
     assert "password" not in metadata.lower()
     assert "username" not in metadata.lower()
 
+    try:
+        manager.mark_connected()
+    except ValueError as error:
+        assert "persistent" in str(error)
+    else:
+        raise AssertionError("Fallback browser sessions must not be marked connected")
+
+    manager.open_url = lambda _url, opener=None: True
+    persistent_launch = manager.begin_sign_in(opener=lambda _url: True)
+    assert persistent_launch.persistent is True
     manager.mark_connected()
     assert manager.state()["status"] == "connected"
     shutil.rmtree(manager.profile_path)

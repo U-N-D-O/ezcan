@@ -38,9 +38,9 @@ class EbayAccountManager:
         status = str(data.get("status", "login_required"))
         if status not in {"not_connected", "login_required", "connected"}:
             status = "login_required"
-        if status == "connected" and not self.profile_path.is_dir():
+        if status == "connected" and (not self.profile_path.is_dir() or data.get("persistent") is not True):
             status = "login_required"
-            self._write_state(status)
+            self._write_state(status, persistent=False)
         return {"status": status, "profilePath": str(self.profile_path)}
 
     def begin_sign_in(
@@ -48,8 +48,9 @@ class EbayAccountManager:
         opener: Callable[[str], bool] = webbrowser.open_new_tab,
     ) -> AccountLaunch:
         self.profile_path.mkdir(parents=True, exist_ok=True)
-        self._write_state("login_required")
+        self._write_state("login_required", persistent=False)
         launch = self.open_url(EBAY_SIGN_IN_URL, opener=opener)
+        self._write_state("login_required", persistent=launch)
         return AccountLaunch(EBAY_SIGN_IN_URL, self.profile_path, persistent=launch)
 
     def open_url(
@@ -77,20 +78,27 @@ class EbayAccountManager:
     def mark_connected(self) -> None:
         if not self.profile_path.is_dir():
             raise ValueError("Sign in through the eBay browser profile first")
-        self._write_state("connected")
+        try:
+            data = json.loads(self.metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("Start sign-in through the dedicated eBay browser profile first") from error
+        if data.get("persistent") is not True:
+            raise ValueError("A supported browser is required for a separate persistent eBay session")
+        self._write_state("connected", persistent=True)
 
     def mark_login_required(self) -> None:
-        self._write_state("login_required")
+        self._write_state("login_required", persistent=False)
 
     def remove_profile(self) -> None:
         if self.profile_path.exists():
             shutil.rmtree(self.profile_path)
-        self._write_state("not_connected")
+        self._write_state("not_connected", persistent=False)
 
-    def _write_state(self, status: str) -> None:
+    def _write_state(self, status: str, persistent: bool) -> None:
         self.base_path.mkdir(parents=True, exist_ok=True)
         payload = {
             "status": status,
+            "persistent": persistent,
             "profilePath": str(self.profile_path),
             "updatedAt": datetime.now(timezone.utc).isoformat(),
         }
