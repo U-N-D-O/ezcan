@@ -12,57 +12,64 @@ struct SharedFilesView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                EzcanBackground()
-                Group {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    EzcanConsoleBar(section: "FILES", statusTitle: isLoading ? "SYNCING" : "ONLINE", trailingAction: { dismiss() })
+                    HStack(alignment: .center, spacing: 18) {
+                        EzcanInstrumentRing(progress: files.isEmpty ? 0.12 : 0.72, accent: EzcanTheme.blue) {
+                            VStack(spacing: 5) {
+                                Image(systemName: "arrow.down.to.line")
+                                    .font(.system(size: 24, weight: .medium))
+                                    .foregroundStyle(EzcanTheme.blue)
+                                Text("FILES")
+                                    .font(.system(size: 12, weight: .black, design: .rounded))
+                                    .foregroundStyle(EzcanTheme.ink)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("COMPUTER LIBRARY")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(EzcanTheme.muted)
+                            Text("Ready to move")
+                                .font(.title2.bold())
+                                .foregroundStyle(EzcanTheme.ink)
+                            Text("Download shared files from the connected workstation.")
+                                .font(.subheadline)
+                                .foregroundStyle(EzcanTheme.muted)
+                            Button {
+                                Task { await refresh() }
+                            } label: {
+                                Label("Refresh", systemImage: "arrow.clockwise")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .buttonStyle(EzcanSecondaryButtonStyle())
+                            .disabled(isLoading)
+                        }
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity)
+                    .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                    .shadow(color: EzcanTheme.shadow, radius: 14, y: 7)
                     if isLoading && files.isEmpty {
-                        ProgressView("CHECKING COMPUTER...")
+                        ProgressView("Checking computer...")
                             .tint(EzcanTheme.cyan)
                             .foregroundStyle(EzcanTheme.ink)
+                            .padding(.vertical, 35)
                     } else if files.isEmpty {
-                        ContentUnavailableView(
-                            "No files ready",
-                            systemImage: "tray",
-                            description: Text("Choose a file in Ezcan Computer first.")
-                        )
-                        .foregroundStyle(EzcanTheme.muted)
+                        emptyState
                     } else {
-                        ScrollView(showsIndicators: false) {
-                            VStack(spacing: 12) {
-                                ForEach(files) { file in
-                                    fileCard(file)
-                                }
+                        VStack(spacing: 12) {
+                            ForEach(files) { file in
+                                fileCard(file)
                             }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 18)
                         }
                     }
                 }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 18)
             }
-            .navigationTitle("Files from computer")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(EzcanTheme.canvas, for: .navigationBar)
-            .toolbarColorScheme(.light, for: .navigationBar)
-            .tint(EzcanTheme.cyan)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Done")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .disabled(isLoading)
-                    .accessibilityLabel("Refresh files")
-                }
-            }
+            .background(EzcanBackground())
+            .toolbar(.hidden, for: .navigationBar)
             .alert("File transfer failed", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
@@ -75,6 +82,23 @@ struct SharedFilesView: View {
             .sheet(item: $shareItem) { item in
                 ShareSheet(fileURL: item.url)
             }
+        }
+    }
+
+    private var emptyState: some View {
+        EzcanSoftControl(tint: EzcanTheme.line) {
+            VStack(spacing: 8) {
+                Image(systemName: "tray")
+                    .font(.title2)
+                    .foregroundStyle(EzcanTheme.muted)
+                Text("NO FILES READY")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(EzcanTheme.ink)
+                Text("Choose a file in Ezcan Computer first.")
+                    .font(.caption)
+                    .foregroundStyle(EzcanTheme.muted)
+            }
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -109,6 +133,7 @@ struct SharedFilesView: View {
             .foregroundStyle(EzcanTheme.ink)
             .frame(width: 42, height: 42)
             .background(EzcanTheme.greenSoft, in: Circle())
+            .overlay { Circle().stroke(EzcanTheme.green.opacity(0.35), lineWidth: 1) }
             .disabled(downloadingID != nil)
             .accessibilityLabel("Download \(file.fileName)")
         }

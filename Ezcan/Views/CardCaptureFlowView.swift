@@ -46,12 +46,12 @@ struct CardCaptureFlowView: View {
     @State private var isCameraDismissing = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            dashboardSidebar
+        ZStack {
+            background
             content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 18)
+                .frame(maxWidth: 720, maxHeight: .infinity)
         }
-        .background(background)
         .preferredColorScheme(.light)
         .task(id: cardGeneration) {
             guard !hasStarted else { return }
@@ -104,51 +104,6 @@ struct CardCaptureFlowView: View {
         EzcanBackground()
     }
 
-    private var dashboardSidebar: some View {
-        VStack(spacing: 10) {
-            Image("ezcan_logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 38, height: 38)
-                .padding(.bottom, 20)
-            RoundedRectangle(cornerRadius: 1)
-                .fill(EzcanTheme.line)
-                .frame(width: 24, height: 1)
-            EzcanNavigationItem(title: "Capture", icon: "camera.viewfinder", isSelected: isCaptureSection) {
-                guard !isBusy else { return }
-                phase = .capturing(.front)
-            }
-            EzcanNavigationItem(title: "Files", icon: "folder", isSelected: sharedFilesPresented) {
-                sharedFilesPresented = true
-            }
-            Spacer()
-            EzcanStatusPill(title: "LIVE")
-            Button {
-                pairingStore.unpair()
-            } label: {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.headline)
-                    .foregroundStyle(EzcanTheme.pink)
-                    .frame(width: 44, height: 44)
-                    .background(EzcanTheme.pinkSoft, in: Circle())
-            }
-            .accessibilityLabel("Disconnect computer")
-        }
-        .frame(width: 82)
-        .padding(.vertical, 24)
-        .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: EzcanTheme.shadow, radius: 14, y: 5)
-        .padding(.leading, 12)
-        .padding(.vertical, 14)
-    }
-
-    private var isCaptureSection: Bool {
-        switch phase {
-        case .capturing, .preparing, .options, .naming: return true
-        case .complete, .failed: return false
-        }
-    }
-
     @ViewBuilder
     private var content: some View {
         switch phase {
@@ -199,13 +154,20 @@ struct CardCaptureFlowView: View {
 
     private var preparingView: some View {
         VStack(spacing: 18) {
+            EzcanConsoleBar(section: "CAPTURE")
             Spacer()
-            Image("ezcan_logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 120, height: 120)
-            ProgressView()
-                .tint(EzcanTheme.cyan)
+            EzcanInstrumentRing(progress: 0.28) {
+                VStack(spacing: 8) {
+                    ProgressView()
+                        .tint(EzcanTheme.cyan)
+                    Text("PREPARING")
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundStyle(EzcanTheme.ink)
+                    Text("STARTING INTAKE")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(EzcanTheme.muted)
+                }
+            }
             Text("Preparing your card")
                 .font(.headline)
                 .foregroundStyle(EzcanTheme.ink)
@@ -217,58 +179,84 @@ struct CardCaptureFlowView: View {
     }
 
     private func capturePrompt(_ stage: CaptureStage) -> some View {
-        VStack(spacing: 0) {
-            header
-            Spacer()
-            VStack(spacing: 16) {
-                Image(systemName: stage == .video ? "video.fill" : "camera.viewfinder")
-                    .font(.system(size: 34, weight: .medium))
-                    .foregroundStyle(EzcanTheme.cyan)
-                Text(stage.title.uppercased())
-                    .font(.system(size: 34, weight: .black, design: .rounded))
-                    .tracking(2)
-                    .foregroundStyle(EzcanTheme.ink)
-                Text(stage == .video ? "Move slowly around the card surface" : "Place the card inside the guide")
-                    .foregroundStyle(EzcanTheme.muted)
-                Button {
-                    cameraStage = stage
-                } label: {
-                    Label("Open camera", systemImage: "camera.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 17)
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 18) {
+                EzcanConsoleBar(section: "CAPTURE")
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("CAPTURE STAGE")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(EzcanTheme.muted)
+                        Text(stage.title)
+                            .font(.title2.bold())
+                            .foregroundStyle(EzcanTheme.ink)
+                    }
+                    Spacer()
+                    EzcanStatusPill(title: "STEP \(stageIndex(stage))/4", color: EzcanTheme.cyan)
                 }
-                .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.blue))
-                .disabled(isBusy)
+                VStack(spacing: 14) {
+                    EzcanInstrumentRing(progress: stageProgress(stage), accent: stage == .video ? EzcanTheme.pink : EzcanTheme.cyan) {
+                        VStack(spacing: 8) {
+                            Image(systemName: stage == .video ? "video.fill" : "camera.viewfinder")
+                                .font(.system(size: 29, weight: .medium))
+                                .foregroundStyle(stage == .video ? EzcanTheme.pink : EzcanTheme.cyan)
+                            Text(stage.title.uppercased())
+                                .font(.system(size: 18, weight: .black, design: .rounded))
+                                .foregroundStyle(EzcanTheme.ink)
+                            Text("READY TO CAPTURE")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                .foregroundStyle(EzcanTheme.muted)
+                        }
+                    }
+                    Text(stage == .video ? "Move slowly around the card surface" : "Place the card inside the guide")
+                        .font(.subheadline)
+                        .foregroundStyle(EzcanTheme.muted)
+                    Button {
+                        cameraStage = stage
+                    } label: {
+                        Label("Open camera", systemImage: "camera.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                    }
+                    .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.blue))
+                    .disabled(isBusy)
+                }
+                .padding(22)
+                .frame(maxWidth: 480)
+                .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(EzcanTheme.cyan.opacity(0.35), lineWidth: 1) }
+                .shadow(color: EzcanTheme.shadow, radius: 15, y: 7)
+                if let statusMessage {
+                    statusBanner(statusMessage)
+                }
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 28)
-            .frame(maxWidth: 430)
-            .ezcanPanel(accent: EzcanTheme.cyan, glow: true)
-            Spacer()
-            if let statusMessage {
-                statusBanner(statusMessage)
-            }
+            .padding(.vertical, 18)
         }
     }
 
     private var optionsView: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
-                header
-                VStack(spacing: 10) {
+            VStack(spacing: 18) {
+                EzcanConsoleBar(section: "CAPTURE")
+                VStack(spacing: 8) {
                     Text("CARD MEDIA")
-                        .font(.system(size: 30, weight: .black, design: .rounded))
-                        .tracking(1.6)
+                        .font(.system(size: 28, weight: .black, design: .rounded))
                         .foregroundStyle(EzcanTheme.ink)
-                    Text("Add anything that helps show this card clearly.")
+                    Text("Choose what to add before archiving.")
                         .font(.subheadline)
                         .foregroundStyle(EzcanTheme.muted)
-                        .multilineTextAlignment(.center)
                 }
-                .padding(.top, 28)
-                .padding(.bottom, 28)
-                captureSummary
+                EzcanInstrumentRing(progress: min(1, Double(capturedMedia.count) / 4.0), accent: EzcanTheme.green) {
+                    VStack(spacing: 6) {
+                        Text("\(capturedMedia.count)")
+                            .font(.system(size: 36, weight: .black, design: .rounded))
+                            .foregroundStyle(EzcanTheme.ink)
+                        Text("MEDIA READY")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundStyle(EzcanTheme.muted)
+                    }
+                }
                 VStack(spacing: 13) {
                     optionButton("Additional photo", "Corners, edges, holo or defects", "plus.viewfinder", EzcanTheme.amber) {
                         phase = .capturing(.additional)
@@ -283,13 +271,12 @@ struct CardCaptureFlowView: View {
                         phase = .naming
                     }
                 }
-                .padding(.horizontal, 22)
-                .padding(.bottom, 22)
+                .frame(maxWidth: 520)
                 if let statusMessage {
                     statusBanner(statusMessage)
-                        .padding(.bottom, 20)
                 }
             }
+            .padding(.vertical, 18)
         }
     }
 
@@ -347,29 +334,36 @@ struct CardCaptureFlowView: View {
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(EzcanTheme.muted)
             }
-            .padding(16)
-                .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .background(EzcanTheme.white, in: Capsule())
             .overlay {
-                RoundedRectangle(cornerRadius: 18)
+                Capsule()
                     .stroke(EzcanTheme.line, lineWidth: 1)
             }
-                .shadow(color: EzcanTheme.shadow, radius: 10, y: 4)
+            .shadow(color: EzcanTheme.shadow, radius: 10, y: 4)
         }
         .buttonStyle(.plain)
     }
 
     private var namingView: some View {
-        VStack(spacing: 0) {
-            header
-            Spacer()
-            VStack(spacing: 20) {
-                Image(systemName: "barcode.viewfinder")
-                    .font(.system(size: 50, weight: .medium))
-                    .foregroundStyle(EzcanTheme.cyan)
-                Text("Name this card")
-                    .font(.system(size: 32, weight: .black, design: .rounded))
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 18) {
+                EzcanConsoleBar(section: "ARCHIVE")
+                EzcanInstrumentRing(progress: ArchiveCodeRules.isValid(archiveCode) ? 1 : 0.48, accent: EzcanTheme.blue) {
+                    VStack(spacing: 6) {
+                        Image(systemName: "barcode.viewfinder")
+                            .font(.system(size: 28, weight: .medium))
+                            .foregroundStyle(EzcanTheme.blue)
+                        Text("NAME")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .foregroundStyle(EzcanTheme.ink)
+                    }
+                }
+                Text("Archive this card")
+                    .font(.title2.bold())
                     .foregroundStyle(EzcanTheme.ink)
-                Text("Use the four-character archive code for this physical card.")
+                Text("Choose its four-character storage code.")
                     .font(.subheadline)
                     .foregroundStyle(EzcanTheme.muted)
                     .multilineTextAlignment(.center)
@@ -381,62 +375,68 @@ struct CardCaptureFlowView: View {
                     .multilineTextAlignment(.center)
                     .padding(.vertical, 16)
                     .foregroundStyle(EzcanTheme.ink)
-                    .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(EzcanTheme.panelDeep, in: Capsule())
                     .overlay {
-                        RoundedRectangle(cornerRadius: 14)
+                        Capsule()
                             .stroke(ArchiveCodeRules.isValid(archiveCode) ? EzcanTheme.green : EzcanTheme.line, lineWidth: 2)
                     }
                     .onChange(of: archiveCode) { _, value in
                         archiveCode = ArchiveCodeRules.filtered(value)
                     }
+                    .frame(maxWidth: 360)
                 Text("Letter, number, letter, number")
                     .font(.caption)
-                    .foregroundStyle(EzcanTheme.muted.opacity(0.75))
-            }
-            .padding(.horizontal, 32)
-            Spacer()
-            HStack(spacing: 12) {
-                Button {
-                    phase = .options
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .frame(width: 56, height: 56)
-                }
-                .buttonStyle(EzcanSecondaryButtonStyle())
-                Button {
-                    Task { await finishCard() }
-                } label: {
-                    if isBusy {
-                        ProgressView().tint(.white)
-                    } else {
-                        Label("Finish card", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(EzcanTheme.muted)
+                HStack(spacing: 12) {
+                    Button {
+                        phase = .options
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .frame(width: 56, height: 56)
                     }
+                    .buttonStyle(EzcanSecondaryButtonStyle())
+                    Button {
+                        Task { await finishCard() }
+                    } label: {
+                        if isBusy {
+                            ProgressView().tint(EzcanTheme.ink)
+                        } else {
+                            Label("Archive card", systemImage: "checkmark.circle.fill")
+                        }
+                    }
+                    .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.blue))
+                    .frame(maxWidth: .infinity, minHeight: 56)
+                    .disabled(!ArchiveCodeRules.isValid(archiveCode) || isBusy)
                 }
-                .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.blue))
-                .frame(maxWidth: .infinity, minHeight: 64)
-                .disabled(!ArchiveCodeRules.isValid(archiveCode) || isBusy)
+                .frame(maxWidth: 520)
             }
-            .padding(.horizontal, 22)
-            .padding(.bottom, 24)
+            .padding(.vertical, 18)
         }
     }
 
     private func completedView(_ code: String) -> some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 18) {
+            EzcanConsoleBar(section: "ARCHIVE", statusTitle: "COMPLETE", statusColor: EzcanTheme.green)
             Spacer()
-            Image("ezcan_logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 110, height: 110)
+            EzcanInstrumentRing(progress: 1, accent: EzcanTheme.green) {
+                VStack(spacing: 6) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(EzcanTheme.green)
+                    Text("SAVED")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .foregroundStyle(EzcanTheme.ink)
+                }
+            }
             Text("CARD ARCHIVED")
-                .font(.system(size: 26, weight: .black, design: .rounded))
-                .tracking(1.2)
+                .font(.title2.bold())
+                .foregroundStyle(EzcanTheme.ink)
             Text(code)
-                .font(.system(size: 58, weight: .bold, design: .monospaced))
+                .font(.system(size: 48, weight: .bold, design: .monospaced))
                 .foregroundStyle(EzcanTheme.green)
-                .padding(.horizontal, 25)
-                .padding(.vertical, 18)
-                .background(EzcanTheme.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .padding(.horizontal, 28)
+                .padding(.vertical, 15)
+                .background(EzcanTheme.greenSoft, in: Capsule())
             Text("The photos and video are safely on the computer.")
                 .font(.subheadline)
                 .foregroundStyle(EzcanTheme.muted)
@@ -444,11 +444,11 @@ struct CardCaptureFlowView: View {
             Button {
                 resetForNextCard()
             } label: {
-                Label("Next card", systemImage: "plus.circle.fill")
+                Label("Start next card", systemImage: "plus.circle.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.blue))
-            .padding(.horizontal, 28)
+            .frame(maxWidth: 420)
             Spacer()
         }
         .padding(28)
@@ -456,12 +456,16 @@ struct CardCaptureFlowView: View {
 
     private func failedView(_ message: String) -> some View {
         VStack(spacing: 18) {
+            EzcanConsoleBar(section: "CAPTURE", statusTitle: "ERROR", statusColor: EzcanTheme.pink)
             Spacer()
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(EzcanTheme.magenta)
+            EzcanInstrumentRing(progress: 0.15, accent: EzcanTheme.pink) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(EzcanTheme.pink)
+            }
             Text("Could not start card")
                 .font(.title2.bold())
+                .foregroundStyle(EzcanTheme.ink)
             Text(message)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(EzcanTheme.muted)
@@ -470,7 +474,7 @@ struct CardCaptureFlowView: View {
                 hasStarted = false
             }
             .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.magenta))
-            .padding(.horizontal, 28)
+            .frame(maxWidth: 420)
             Spacer()
         }
         .padding(28)
@@ -485,6 +489,19 @@ struct CardCaptureFlowView: View {
             .background(EzcanTheme.white, in: Capsule())
             .overlay { Capsule().stroke(EzcanTheme.line, lineWidth: 1) }
             .shadow(color: EzcanTheme.shadow, radius: 8, y: 4)
+    }
+
+    private func stageIndex(_ stage: CaptureStage) -> Int {
+        switch stage {
+        case .front: return 1
+        case .back: return 2
+        case .additional: return 3
+        case .video: return 4
+        }
+    }
+
+    private func stageProgress(_ stage: CaptureStage) -> Double {
+        Double(stageIndex(stage)) / 4.0
     }
 
     private func createIntake() async {

@@ -126,3 +126,108 @@ struct EzcanNavigationItem: View {
         .buttonStyle(.plain)
     }
 }
+
+struct EzcanConsoleBar: View {
+    let section: String
+    var statusTitle: String = "ONLINE"
+    var statusColor: Color = EzcanTheme.green
+    var trailingAction: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("EZCAN")
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundStyle(EzcanTheme.ink)
+                Text(section)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(EzcanTheme.muted)
+            }
+            Spacer(minLength: 10)
+            HStack(spacing: 3) {
+                ForEach(section == "PAIR" ? ["PAIR"] : ["CAPTURE", "FILES"], id: \.self) { item in
+                    Text(item)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(item == section ? EzcanTheme.cyan : EzcanTheme.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(item == section ? EzcanTheme.cyanSoft : .clear, in: Capsule())
+                }
+            }
+            .background(EzcanTheme.panelDeep, in: Capsule())
+            Spacer(minLength: 10)
+            EzcanStatusPill(title: statusTitle, color: statusColor)
+            if let trailingAction {
+                Button(action: trailingAction) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(EzcanTheme.muted)
+                        .frame(width: 26, height: 26)
+                        .background(EzcanTheme.panelDeep, in: Circle())
+                }
+                .accessibilityLabel("Close")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(EzcanTheme.white, in: Capsule())
+        .overlay { Capsule().stroke(EzcanTheme.line, lineWidth: 1) }
+        .shadow(color: EzcanTheme.shadow, radius: 12, y: 5)
+    }
+}
+
+struct EzcanInstrumentRing<Content: View>: View {
+    let progress: Double
+    let accent: Color
+    let content: Content
+
+    init(progress: Double, accent: Color = EzcanTheme.cyan, @ViewBuilder content: () -> Content) {
+        self.progress = progress
+        self.accent = accent
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<24, id: \.self) { tick in
+                Capsule()
+                    .fill(tick < Int(progress * 24) ? accent : EzcanTheme.line)
+                    .frame(width: 2, height: tick.isMultiple(of: 4) ? 11 : 7)
+                    .offset(y: -114)
+                    .rotationEffect(.degrees(Double(tick) * 15))
+            }
+            Circle()
+                .stroke(EzcanTheme.line, lineWidth: 10)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(accent, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Circle()
+                .fill(EzcanTheme.white)
+                .overlay { Circle().stroke(EzcanTheme.line.opacity(0.7), lineWidth: 1) }
+                .padding(22)
+            content
+        }
+        .frame(width: 250, height: 250)
+    }
+}
+
+struct EzcanSoftControl<Content: View>: View {
+    let tint: Color
+    let content: Content
+
+    init(tint: Color = EzcanTheme.cyan, @ViewBuilder content: () -> Content) {
+        self.tint = tint
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .background(EzcanTheme.white, in: Capsule())
+            .overlay { Capsule().stroke(tint.opacity(0.28), lineWidth: 1) }
+            .shadow(color: EzcanTheme.shadow, radius: 8, y: 4)
+    }
+}
