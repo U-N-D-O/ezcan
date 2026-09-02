@@ -826,6 +826,7 @@ class Store:
             raise ValueError("Card was not found")
         if card["status"] not in {"identified", "researched"}:
             raise ValueError("Confirm the card identity before recording pricing research")
+        self.market_recommendation(archive_code)
         with self.connection() as connection:
             connection.execute(
                 "UPDATE cards SET status = 'researched', updated_at = ? WHERE archive_code = ?",

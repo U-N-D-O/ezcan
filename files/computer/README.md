@@ -19,6 +19,7 @@ Windows companion program for the Ezcan iOS capture app.
 - State-aware selected-card controls that enable only the next valid workflow actions.
 - Dedicated `RESEARCH PRICES` summary showing sold evidence, active competition, buyer totals, owner shipping, fees, and profit assumptions separately.
 - Successful price research marks the card `researched`; adding another eBay comparable returns it to identity-confirmed status so the report can be refreshed.
+- A card cannot enter `researched` without at least one sold comparable; active listings remain separate competition evidence.
 - Local draft review shows the stored market evidence and shipping assumptions beside the editable title and description.
 - Recording a new comparable marks an existing draft's pricing as outdated and shows a refresh warning without deleting edits.
 - Local draft review also shows archived front and back media thumbnails before local approval.

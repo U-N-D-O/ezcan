@@ -616,6 +616,43 @@ def test_ebay_candidate_rejects_non_ebay_https_host(tmp_path: Path) -> None:
         raise AssertionError("Expected a non-eBay host to fail")
 
 
+def test_mark_prices_researched_requires_sold_comparable(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "data")
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.token}"}
+    intake_id = client.post("/api/intakes", headers=headers, json={}).json()["intakeId"]
+    content = b"active-only-card"
+    media_headers = {
+        **headers,
+        "X-Ezcan-File-Name": "front.jpg",
+        "X-Ezcan-Media-Type": "image",
+        "X-Ezcan-SHA256": hashlib.sha256(content).hexdigest(),
+    }
+    assert client.post(f"/api/intakes/{intake_id}/media", headers=media_headers, content=content).status_code == 200
+    archive_code = client.post(f"/api/intakes/{intake_id}/complete", headers=headers, json={}).json()["archiveCode"]
+    card = app.state.store.card_by_archive_code(archive_code)
+    search_id = app.state.store.start_ebay_search(card, Path(card["folder_path"]) / "generated" / "ebay-search.jpg")
+    app.state.store.add_ebay_candidate(
+        search_id,
+        {
+            "market_status": "active",
+            "title": "Active card listing",
+            "item_url": "https://www.ebay.com/itm/234",
+            "price": "60",
+            "shipping_price": "34",
+        },
+    )
+    app.state.store.confirm_card_identity(archive_code, {"card_name": "Pikachu", "set_name": "Base Set", "card_number": "58/102"})
+
+    try:
+        app.state.store.mark_prices_researched(archive_code)
+    except ValueError as error:
+        assert "sold comparable" in str(error)
+    else:
+        raise AssertionError("Expected pricing research without sold evidence to fail")
+    assert app.state.store.card_by_archive_code(archive_code)["status"] == "identified"
+
+
 def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path) -> None:
     app = create_app(tmp_path / "data")
     client = TestClient(app)
