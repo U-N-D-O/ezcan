@@ -48,7 +48,7 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 0.025, green: 0.055, blue: 0.11, alpha: 1)
+        view.backgroundColor = UIColor(red: 0.94, green: 0.97, blue: 0.98, alpha: 1)
         buildView()
         requestCameraAccess()
     }
@@ -78,8 +78,8 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
 
         let title = UILabel()
         title.translatesAutoresizingMaskIntoConstraints = false
-        title.text = "SCAN EZCAN COMPUTER"
-        title.textColor = UIColor(red: 0.95, green: 0.98, blue: 1.0, alpha: 1)
+        title.text = "Scan Ezcan Computer"
+        title.textColor = UIColor(red: 0.07, green: 0.12, blue: 0.16, alpha: 1)
         title.font = .systemFont(ofSize: 22, weight: .bold)
         title.textAlignment = .center
         view.addSubview(title)
@@ -87,7 +87,7 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
         let instruction = UILabel()
         instruction.translatesAutoresizingMaskIntoConstraints = false
         instruction.text = "Point at the QR code shown on the computer"
-        instruction.textColor = UIColor(red: 0.52, green: 0.64, blue: 0.77, alpha: 1)
+        instruction.textColor = UIColor(red: 0.34, green: 0.42, blue: 0.47, alpha: 1)
         instruction.font = .systemFont(ofSize: 15, weight: .medium)
         instruction.textAlignment = .center
         instruction.numberOfLines = 0
@@ -101,10 +101,10 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
         cancelConfiguration.title = "Cancel"
         cancelConfiguration.image = UIImage(systemName: "xmark")
         cancelConfiguration.imagePadding = 6
-        cancelConfiguration.baseForegroundColor = .white
-        cancelConfiguration.baseBackgroundColor = UIColor(red: 0.075, green: 0.145, blue: 0.23, alpha: 0.9)
+        cancelConfiguration.baseForegroundColor = UIColor(red: 0.07, green: 0.12, blue: 0.16, alpha: 1)
+        cancelConfiguration.baseBackgroundColor = UIColor.white.withAlphaComponent(0.94)
         cancelConfiguration.cornerStyle = .capsule
-        cancelConfiguration.background.strokeColor = UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 0.42)
+        cancelConfiguration.background.strokeColor = UIColor(red: 0.10, green: 0.76, blue: 0.78, alpha: 0.42)
         cancelConfiguration.background.strokeWidth = 1
         let cancelButton = UIButton(configuration: cancelConfiguration)
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
@@ -152,13 +152,13 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = message
-        label.textColor = .white
+        label.textColor = UIColor(red: 0.07, green: 0.12, blue: 0.16, alpha: 1)
         label.textAlignment = .center
         label.numberOfLines = 0
-        label.backgroundColor = UIColor(red: 0.025, green: 0.065, blue: 0.115, alpha: 0.9)
+        label.backgroundColor = UIColor.white.withAlphaComponent(0.96)
         label.layer.cornerRadius = 14
         label.layer.borderWidth = 1
-        label.layer.borderColor = UIColor(red: 0.90, green: 0.22, blue: 0.43, alpha: 0.65).cgColor
+        label.layer.borderColor = UIColor(red: 0.90, green: 0.30, blue: 0.44, alpha: 0.65).cgColor
         label.clipsToBounds = true
         view.addSubview(label)
         NSLayoutConstraint.activate([
