@@ -40,13 +40,19 @@ The workflow at `.github/workflows/build-ios.yml` builds an arm64 iOS IPA on eve
 
 ### One-command IPA build
 
+The easiest Windows option is the double-clickable Python GUI [build_ios_ipa.pyw](build_ios_ipa.pyw). It needs only Python, Git, and the GitHub CLI. Double-click the file, press **Build and download IPA**, and it will show a progress bar and log while it commits/pushes changes, runs the macOS build, downloads the `ezcan-ios-ipa` artifact, and displays a completion alert. Authenticate the GitHub CLI once with `gh auth login`.
+
+The downloaded `Ezcan-unsigned.ipa` is placed under `artifacts\ios`. When the worktree is clean, the GUI starts a manual build of the current `main` automatically.
+
+For command-line use, the PowerShell version remains available:
+
 On Windows, [build-ios-ipa.ps1](build-ios-ipa.ps1) stages and commits the current changes, pushes `main`, waits for the matching macOS GitHub Actions build, downloads the `ezcan-ios-ipa` artifact, displays a progress bar, and shows a completion alert. Authenticate the GitHub CLI once with `gh auth login`, then run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build-ios-ipa.ps1 -CommitMessage "Build latest Ezcan IPA"
 ```
 
-The downloaded `Ezcan-unsigned.ipa` is placed under `artifacts\ios`. If there are no local changes and you want to rebuild the current `main`, add `-RunEvenIfClean`. The script refuses to stage paths that look like secrets or signing files. The IPA remains unsigned and must be installed through AltStore or AltServer.
+If there are no local changes, add `-RunEvenIfClean`. The script refuses to stage paths that look like secrets or signing files. The IPA remains unsigned and must be installed through AltStore or AltServer.
 
 The unsigned IPA is not directly installable by iOS until AltStore or AltServer signs it. A future distribution workflow can add Apple Developer signing, but no signing secrets are needed for the current AltServer workflow. Never commit certificates, profiles, private keys, or passwords.
 
