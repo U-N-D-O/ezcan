@@ -71,6 +71,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private var closeUpFrames = 0
     private var standardFrames = 0
     private var nextAutomaticSwitchDate = Date.distantPast
+    private var pendingCropRect: CGRect?
 
     init(
         title: String,
@@ -308,7 +309,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             self.session.beginConfiguration()
             self.session.sessionPreset = self.mode == .photo ? .photo : .hd1920x1080
 
-            guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+            guard let camera = Self.preferredStandardCamera(),
                   let videoInput = try? AVCaptureDeviceInput(device: camera),
                   self.session.canAddInput(videoInput) else {
                 self.session.commitConfiguration()
@@ -337,6 +338,9 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                 }
                 self.session.addOutput(self.photoOutput)
                 self.photoOutput.isHighResolutionCaptureEnabled = true
+                if let connection = self.photoOutput.connection(with: .video), connection.isVideoStabilizationSupported {
+                    connection.preferredVideoStabilizationMode = .auto
+                }
             } else {
                 guard self.session.canAddOutput(self.movieOutput) else {
                     self.session.commitConfiguration()
@@ -373,6 +377,12 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         DispatchQueue.main.async { [weak self] in
             self?.statusLabel.text = message
         }
+    }
+
+    private static func preferredStandardCamera() -> AVCaptureDevice? {
+        AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
+            ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
+            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
     }
 
     private func configureContinuousFocus(on camera: AVCaptureDevice) {
@@ -536,8 +546,14 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     private func setPortraitOrientation() {
-        guard let connection = previewLayer?.connection, connection.isVideoOrientationSupported else { return }
-        connection.videoOrientation = .portrait
+        let connections = [
+            previewLayer?.connection,
+            photoOutput.connection(with: .video),
+            movieOutput.connection(with: .video)
+        ].compactMap { $0 }
+        for connection in connections where connection.isVideoOrientationSupported {
+            connection.videoOrientation = .portrait
+        }
     }
 
     private func capturePressed(_ button: UIButton) {
@@ -552,10 +568,23 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
 
     private func capturePhoto() {
         guard !hasFinished else { return }
+        pendingCropRect = previewCropRect()
         let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
         settings.isHighResolutionPhotoEnabled = true
+        settings.photoQualityPrioritization = .quality
+        if let connection = photoOutput.connection(with: .video), connection.isVideoStabilizationSupported {
+            connection.preferredVideoStabilizationMode = .auto
+        }
         photoOutput.capturePhoto(with: settings, delegate: self)
-        statusLabel.text = "Capturing..."
+        updateStatus("Capturing high-quality card image...")
+    }
+
+    private func previewCropRect() -> CGRect? {
+        guard let previewLayer else { return nil }
+        let guideRect = previewView.convert(guideView.bounds, from: guideView)
+        let normalizedRect = previewLayer.metadataOutputRectConverted(fromLayerRect: guideRect)
+        guard normalizedRect.width > 0.05, normalizedRect.height > 0.05 else { return nil }
+        return normalizedRect.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
     }
 
     private func startRecording(_ button: UIButton) {
@@ -612,7 +641,8 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         guard error == nil,
               let data = photo.fileDataRepresentation(),
               let image = UIImage(data: data),
-              let jpegData = image.jpegData(compressionQuality: 0.9),
+              let croppedImage = Self.crop(image, to: pendingCropRect),
+              let jpegData = croppedImage.jpegData(compressionQuality: 0.98),
               let url = save(jpegData, extension: "jpg") else {
             updateStatus("Could not capture photo")
             return
@@ -624,6 +654,32 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                 self?.onPhoto(CapturedMedia(fileURL: url, kind: .image, fileName: url.lastPathComponent))
             }
         }
+    }
+
+    private static func crop(_ image: UIImage, to normalizedRect: CGRect?) -> UIImage? {
+        let uprightImage: UIImage
+        if image.imageOrientation == .up {
+            uprightImage = image
+        } else {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = image.scale
+            format.opaque = true
+            uprightImage = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: image.size))
+            }
+        }
+
+        guard let normalizedRect,
+              let source = uprightImage.cgImage else { return uprightImage }
+        let pixelRect = CGRect(
+            x: normalizedRect.minX * CGFloat(source.width),
+            y: normalizedRect.minY * CGFloat(source.height),
+            width: normalizedRect.width * CGFloat(source.width),
+            height: normalizedRect.height * CGFloat(source.height)
+        ).integral.intersection(CGRect(x: 0, y: 0, width: source.width, height: source.height))
+        guard pixelRect.width > 32, pixelRect.height > 32,
+              let cropped = source.cropping(to: pixelRect) else { return uprightImage }
+        return UIImage(cgImage: cropped, scale: uprightImage.scale, orientation: .up)
     }
 
     func fileOutput(

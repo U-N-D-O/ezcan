@@ -9,7 +9,7 @@ The iOS app is in the repository root. The Windows companion program is in `comp
 
 The iOS app uses `ezcan_logo.png` as its bundled welcome-screen logo.
 
-The capture camera has an `AUTO` lens mode that watches focus distance and center-frame sharpness. When a card is too close for the standard lens, it moves to the iPhone's ultra-wide macro camera and returns to the standard camera after the subject is comfortably framed again. `1X` and `MACRO` are also available for manual control. Devices without an ultra-wide camera keep the standard camera active.
+The capture camera has an `AUTO` lens mode that watches focus distance and center-frame sharpness. When a card is too close for the standard lens, it moves to the iPhone's ultra-wide macro camera and returns to the standard camera after the subject is comfortably framed again. `1X` and `MACRO` are also available for manual control. Still photos use the best available virtual camera, quality-priority capture, optical stabilization, and a high-quality JPEG. The saved image is cropped to the four-corner card guide rather than keeping the surrounding camera view. Devices without an ultra-wide camera keep the standard camera active.
 
 ## Current MVP
 
