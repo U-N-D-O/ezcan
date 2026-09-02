@@ -39,13 +39,16 @@ def test_card_action_availability_follows_workflow_state() -> None:
         "search": False,
         "match": False,
         "identity": False,
+        "pricing": False,
         "make_draft": False,
         "review_draft": False,
     }
     assert card_action_availability("received", False)["search"] is True
     assert card_action_availability("received", False)["match"] is False
     assert card_action_availability("searching", False)["match"] is True
+    assert card_action_availability("searching", False)["pricing"] is False
     assert card_action_availability("identified", False)["make_draft"] is True
+    assert card_action_availability("identified", False)["pricing"] is True
     assert card_action_availability("identified", True)["review_draft"] is True
     assert card_action_availability("identified", True)["make_draft"] is False
     assert card_action_availability("recovery_required", False)["search"] is False

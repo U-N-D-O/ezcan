@@ -130,11 +130,12 @@ def validate_card_details(details: dict[str, str]) -> dict[str, str]:
 
 def card_action_availability(status: str | None, has_draft: bool) -> dict[str, bool]:
     if status is None or status == "recovery_required":
-        return {key: False for key in ("search", "match", "identity", "make_draft", "review_draft")}
+        return {key: False for key in ("search", "match", "identity", "pricing", "make_draft", "review_draft")}
     return {
         "search": status in {"received", "searching", "identified"},
         "match": status in {"searching", "identified"},
         "identity": status in {"searching", "identified"},
+        "pricing": status == "identified",
         "make_draft": status == "identified" and not has_draft,
         "review_draft": status == "identified" and has_draft,
     }
@@ -1464,6 +1465,7 @@ class DesktopWindow:
             ("search", "SEARCH EBAY", self.search_selected_card, self.green, "white"),
             ("match", "ADD MATCH", self.record_selected_candidate, self.amber, self.text),
             ("identity", "REVIEW IDENTITY", self.review_selected_matches, self.cyan, self.text),
+            ("pricing", "RESEARCH PRICES", self.research_prices_for_selected_card, self.green, "white"),
             ("make_draft", "MAKE DRAFT", self.create_draft_for_selected_card, self.blue, "white"),
             ("review_draft", "REVIEW DRAFT", self.review_draft_for_selected_card, self.magenta, "white"),
         )
@@ -1945,6 +1947,49 @@ class DesktopWindow:
         tk.Button(buttons, text="REFRESH PRICING", command=refresh_pricing).pack(side="left")
         tk.Button(buttons, text="CANCEL", command=dialog.destroy).pack(side="right", padx=(8, 0))
         tk.Button(buttons, text="CONFIRM IDENTITY", command=confirm).pack(side="right")
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.focus_force()
+
+    def research_prices_for_selected_card(self) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("Research Prices", "Select an archived card first.")
+            return
+        archive_code = str(selected[0])
+        card = self.store.card_by_archive_code(archive_code)
+        if card is None:
+            messagebox.showinfo("Research Prices", "That row needs archive recovery before pricing can run.")
+            return
+        try:
+            recommendation = self.store.market_recommendation(archive_code)
+        except ValueError as error:
+            messagebox.showinfo("Research Prices", str(error))
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Research Prices - {archive_code}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        body = tk.Frame(dialog, bg=self.panel, padx=26, pady=22)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text=f"PRICE RESEARCH  //  {archive_code}", bg=self.panel, fg=self.green, font=("Consolas", 11, "bold")).pack(anchor="w")
+        tk.Label(body, text=f"{card['card_name']} / {card['set_name']} / {card['card_number']}", bg=self.panel, fg=self.text, font=("Bahnschrift", 16, "bold")).pack(anchor="w", pady=(6, 18))
+        summary = (
+            f"SOLD COMPARABLES     {recommendation.sold_count}\n"
+            f"ACTIVE COMPETITION   {recommendation.active_count}\n"
+            f"SOLD BUYER TOTAL     ${recommendation.lowest_sold_total:.2f} - ${recommendation.highest_sold_total:.2f}\n"
+            f"MEDIAN BUYER TOTAL   ${recommendation.median_sold_total:.2f}\n\n"
+            f"SUGGESTED CARD PRICE ${recommendation.suggested_item_low:.2f} - ${recommendation.suggested_item_high:.2f}\n"
+            f"BUYER TOTAL RANGE    ${recommendation.suggested_total_low:.2f} - ${recommendation.suggested_total_high:.2f}\n"
+            f"OWNER FIRST-ITEM SHIP ${recommendation.owner_shipping_charge:.2f}\n"
+            f"ADDITIONAL CARD SHIP $0.00\n\n"
+            f"ESTIMATED FEES       ${recommendation.estimated_fee_low:.2f} - ${recommendation.estimated_fee_high:.2f}\n"
+            f"PROFIT BEFORE COSTS  ${recommendation.estimated_profit_before_costs_low:.2f} - ${recommendation.estimated_profit_before_costs_high:.2f}"
+        )
+        tk.Label(body, text=summary, bg=self.panel_deep, fg=self.text, font=("Consolas", 10), justify="left", anchor="w", padx=18, pady=16).pack(fill="x")
+        tk.Label(body, text="Shipping is shown separately from the card price. Sold and active evidence are not combined.", bg=self.panel, fg=self.muted, font=("Segoe UI", 9), wraplength=470, justify="left").pack(anchor="w", pady=(16, 14))
+        tk.Button(body, text="CLOSE", command=dialog.destroy).pack(anchor="e")
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
         dialog.focus_force()
 
