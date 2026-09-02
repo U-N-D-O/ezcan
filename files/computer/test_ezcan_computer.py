@@ -8,7 +8,7 @@ from PIL import Image
 
 from ebay import open_picture_search
 from ebay_account import EbayAccountManager
-from ezcan_computer import Store, card_action_availability, create_app, default_data_root, increment_archive_code, program_directory
+from ezcan_computer import Store, card_action_availability, create_app, default_data_root, increment_archive_code, listing_draft_evidence_text, program_directory
 from image_processor import find_back_image, prepare_search_image
 from pricing import recommend_price
 
@@ -54,6 +54,28 @@ def test_card_action_availability_follows_workflow_state() -> None:
     assert card_action_availability("identified", True)["review_draft"] is True
     assert card_action_availability("identified", True)["make_draft"] is False
     assert card_action_availability("recovery_required", False)["search"] is False
+
+
+def test_listing_draft_evidence_text_surfaces_stored_market_assumptions() -> None:
+    evidence = listing_draft_evidence_text(
+        {
+            "research": {
+                "soldComparables": 3,
+                "activeComparables": 2,
+                "medianSoldBuyerTotal": "80.00",
+                "estimatedFeeLow": "9.54",
+                "estimatedFeeHigh": "11.66",
+                "estimatedProfitBeforeCostsLow": "36.46",
+                "estimatedProfitBeforeCostsHigh": "42.34",
+            },
+            "suggestedPrice": {"low": "72.00", "high": "88.00", "buyerTotalLow": "72.00", "buyerTotalHigh": "88.00"},
+            "shipping": {"firstItemCharge": "34.00", "additionalItemsCharge": "0.00"},
+        }
+    )
+    assert "SOLD 3  |  ACTIVE 2" in evidence
+    assert "OWNER FIRST-ITEM SHIP $34.00" in evidence
+    assert "PROFIT BEFORE COSTS $36.46-$42.34" in evidence
+    assert listing_draft_evidence_text({}) == "RESEARCH EVIDENCE\nUnavailable in this draft"
 
 
 def test_default_archive_is_next_to_program() -> None:

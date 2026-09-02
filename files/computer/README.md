@@ -19,6 +19,7 @@ Windows companion program for the Ezcan iOS capture app.
 - State-aware selected-card controls that enable only the next valid workflow actions.
 - Dedicated `RESEARCH PRICES` summary showing sold evidence, active competition, buyer totals, owner shipping, fees, and profit assumptions separately.
 - Successful price research marks the card `researched`; adding another eBay comparable returns it to identity-confirmed status so the report can be refreshed.
+- Local draft review shows the stored market evidence and shipping assumptions beside the editable title and description.
 - Selected-card preview presents archived front and back images side by side, with a fallback for older generic filenames.
 - Persistent visible eBay search-account sign-in under `%LOCALAPPDATA%\Ezcan\browser-profile`.
 - Visible browser-assisted eBay picture search launch from the selected-card workspace.

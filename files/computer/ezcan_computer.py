@@ -141,6 +141,24 @@ def card_action_availability(status: str | None, has_draft: bool) -> dict[str, b
     }
 
 
+def listing_draft_evidence_text(draft: dict[str, object]) -> str:
+    research = draft.get("research")
+    suggested_price = draft.get("suggestedPrice")
+    shipping = draft.get("shipping")
+    if not isinstance(research, dict) or not isinstance(suggested_price, dict) or not isinstance(shipping, dict):
+        return "RESEARCH EVIDENCE\nUnavailable in this draft"
+    return (
+        "RESEARCH EVIDENCE\n"
+        f"SOLD {research.get('soldComparables', 0)}  |  ACTIVE {research.get('activeComparables', 0)}  |  "
+        f"MEDIAN BUYER TOTAL ${research.get('medianSoldBuyerTotal', '0.00')}\n"
+        f"SUGGESTED CARD ${suggested_price.get('low', '0.00')}-${suggested_price.get('high', '0.00')}  |  "
+        f"BUYER TOTAL ${suggested_price.get('buyerTotalLow', '0.00')}-${suggested_price.get('buyerTotalHigh', '0.00')}\n"
+        f"OWNER FIRST-ITEM SHIP ${shipping.get('firstItemCharge', '0.00')}  |  ADDITIONAL CARD SHIP ${shipping.get('additionalItemsCharge', '0.00')}  |  "
+        f"ESTIMATED FEES ${research.get('estimatedFeeLow', '0.00')}-${research.get('estimatedFeeHigh', '0.00')}  |  "
+        f"PROFIT BEFORE COSTS ${research.get('estimatedProfitBeforeCostsLow', '0.00')}-${research.get('estimatedProfitBeforeCostsHigh', '0.00')}"
+    )
+
+
 def increment_archive_code(value: str) -> str:
     if not valid_archive_code(value):
         raise ValueError("Archive code must match uppercase letter-digit-letter-digit format")
@@ -2069,6 +2087,18 @@ class DesktopWindow:
         tk.Label(body, text=f"LOCAL DRAFT  //  {archive_code}", bg=self.panel, fg=self.magenta, font=("Consolas", 11, "bold")).pack(anchor="w")
         status_var = tk.StringVar(value=f"Review status: {listing['status']}  |  Never published")
         tk.Label(body, textvariable=status_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(anchor="w", pady=(5, 16))
+        tk.Label(
+            body,
+            text=listing_draft_evidence_text(draft),
+            bg=self.panel_deep,
+            fg=self.cyan,
+            font=("Consolas", 9),
+            justify="left",
+            anchor="w",
+            wraplength=700,
+            padx=14,
+            pady=11,
+        ).pack(fill="x", pady=(0, 16))
         tk.Label(body, text="TITLE", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w")
         title_var = tk.StringVar(value=str(draft.get("title", "")))
         tk.Entry(body, textvariable=title_var, width=80).pack(fill="x", pady=(4, 14))
