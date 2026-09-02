@@ -1,8 +1,10 @@
 import json
+import os
 import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
@@ -27,6 +29,18 @@ LINE = "#d9e2e5"
 
 class PipelineError(RuntimeError):
     pass
+
+
+def hidden_process_options():
+    if sys.platform != "win32":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+        "startupinfo": startupinfo,
+    }
 
 
 class EzcanIPABuilder:
@@ -185,7 +199,7 @@ class EzcanIPABuilder:
                     self.set_activation_state(False)
                     self.update_dial(100, "COMPLETE", "IPA READY")
                     self.status.configure(text="IPA downloaded and ready for AltStore")
-                    messagebox.showinfo("Ezcan IPA build complete", event[1])
+                    self.show_success_dialog(Path(event[1]))
                 elif event[0] == "failure":
                     self.set_activation_state(False)
                     self.update_dial(0, "ERROR", "CHECK ACTIVITY")
@@ -194,6 +208,85 @@ class EzcanIPABuilder:
         except queue.Empty:
             pass
         self.window.after(100, self.process_events)
+
+    def show_success_dialog(self, ipa_path):
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Ezcan IPA build complete")
+        dialog.configure(bg=WHITE)
+        dialog.transient(self.window)
+        dialog.resizable(False, False)
+
+        content = tk.Frame(dialog, bg=WHITE, padx=28, pady=24)
+        content.pack(fill="both", expand=True)
+        tk.Label(
+            content,
+            text="EZCAN IPA BUILD COMPLETE",
+            bg=WHITE,
+            fg=GREEN,
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            content,
+            text="Your IPA is ready.",
+            bg=WHITE,
+            fg=INK,
+            font=("Segoe UI", 15, "bold"),
+        ).pack(anchor="w", pady=(8, 4))
+        tk.Label(
+            content,
+            text=str(ipa_path),
+            bg=WHITE,
+            fg=MUTED,
+            justify="left",
+            wraplength=470,
+            font=("Consolas", 9),
+        ).pack(anchor="w")
+
+        buttons = tk.Frame(content, bg=WHITE)
+        buttons.pack(anchor="e", pady=(22, 0))
+        tk.Button(
+            buttons,
+            text="Open destination folder",
+            command=lambda: self.open_destination_folder(ipa_path, dialog),
+            bg=GREEN_PALE,
+            fg=INK,
+            activebackground="#c8f1d9",
+            activeforeground=INK,
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=8,
+            font=("Segoe UI", 9, "bold"),
+            cursor="hand2",
+        ).pack(side="left", padx=(0, 8))
+        tk.Button(
+            buttons,
+            text="OK",
+            command=dialog.destroy,
+            bg=CYAN,
+            fg=INK,
+            activebackground="#75e1e5",
+            activeforeground=INK,
+            relief="flat",
+            bd=0,
+            padx=22,
+            pady=8,
+            font=("Segoe UI", 9, "bold"),
+            cursor="hand2",
+        ).pack(side="left")
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        dialog.bind("<Return>", lambda _event: dialog.destroy())
+        dialog.grab_set()
+        dialog.focus_force()
+
+    @staticmethod
+    def open_destination_folder(ipa_path, dialog):
+        try:
+            if not hasattr(os, "startfile"):
+                raise OSError("Opening the destination folder is supported on Windows only")
+            os.startfile(str(ipa_path.parent))
+        except OSError as error:
+            messagebox.showerror("Open destination folder", str(error), parent=dialog)
 
     @staticmethod
     def dial_detail_text(message):
@@ -220,6 +313,7 @@ class EzcanIPABuilder:
             text=True,
             encoding="utf-8",
             errors="replace",
+            **hidden_process_options(),
         )
         output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
         if completed.returncode != 0:
@@ -264,7 +358,11 @@ class EzcanIPABuilder:
         if changed:
             self.set_progress(10, "Staging repository changes...")
             self.git(["add", "--all"], label="Stage changes")
-            staged_check = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=str(ROOT))
+            staged_check = subprocess.run(
+                ["git", "diff", "--cached", "--quiet"],
+                cwd=str(ROOT),
+                **hidden_process_options(),
+            )
             if staged_check.returncode == 0:
                 raise PipelineError("The worktree had changes, but nothing was staged.")
             self.set_progress(18, "Creating commit...")
@@ -300,7 +398,7 @@ class EzcanIPABuilder:
         self.write_log("IPA ready: {}".format(ipa_path))
         self.write_log("Actions run: {}".format(completed.get("url", "")))
         self.set_progress(100, "Complete. IPA downloaded.")
-        self.events.put(("success", "The IPA was built and downloaded to:\n\n{}".format(ipa_path)))
+        self.events.put(("success", str(ipa_path)))
 
     def assert_no_sensitive_paths(self):
         status = self.git(["status", "--porcelain"], quiet=True)
