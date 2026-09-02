@@ -3,8 +3,11 @@ import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
+from ebay import open_picture_search
 from ezcan_computer import create_app, default_data_root, increment_archive_code, program_directory
+from image_processor import prepare_search_image
 
 
 def test_default_archive_is_next_to_program() -> None:
@@ -266,3 +269,70 @@ def test_shared_file_can_be_listed_and_downloaded(tmp_path: Path) -> None:
     assert download.status_code == 200
     assert download.headers["content-disposition"].endswith('filename="Ezcan-unsigned.ipa"')
     assert download.content == content
+
+
+def test_prepare_search_image_prefers_front_and_writes_generated_jpeg(tmp_path: Path) -> None:
+    card_folder = tmp_path / "Cards" / "A0A0"
+    original = card_folder / "original"
+    original.mkdir(parents=True)
+    Image.new("RGB", (2400, 3200), "white").save(original / "back.jpg")
+    Image.new("RGB", (1000, 1400), "red").save(original / "front.jpg")
+
+    prepared = prepare_search_image(card_folder)
+
+    assert prepared == card_folder / "generated" / "ebay-search.jpg"
+    assert prepared.is_file()
+    with Image.open(prepared) as image:
+        assert image.format == "JPEG"
+        assert image.size == (1000, 1400)
+
+
+def test_prepare_search_image_fails_without_an_original_image(tmp_path: Path) -> None:
+    card_folder = tmp_path / "Cards" / "A0A0"
+    (card_folder / "original").mkdir(parents=True)
+
+    try:
+        prepare_search_image(card_folder)
+    except FileNotFoundError as error:
+        assert "No image was found" in str(error)
+    else:
+        raise AssertionError("Expected missing front image to fail")
+
+
+def test_picture_search_opener_receives_prepared_image(tmp_path: Path) -> None:
+    image_path = tmp_path / "ebay-search.jpg"
+    image_path.write_bytes(b"jpeg")
+    opened: list[str] = []
+
+    launch = open_picture_search(image_path, opener=lambda url: opened.append(url) or True)
+
+    assert opened == ["https://www.ebay.com/"]
+    assert launch.image_path == image_path
+
+
+def test_ebay_search_session_is_persisted(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "data")
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.token}"}
+    intake_id = client.post("/api/intakes", headers=headers, json={}).json()["intakeId"]
+    content = b"searchable-front"
+    media_headers = {
+        **headers,
+        "X-Ezcan-File-Name": "front.jpg",
+        "X-Ezcan-Media-Type": "image",
+        "X-Ezcan-SHA256": hashlib.sha256(content).hexdigest(),
+    }
+    assert client.post(f"/api/intakes/{intake_id}/media", headers=media_headers, content=content).status_code == 200
+    archive_code = client.post(f"/api/intakes/{intake_id}/complete", headers=headers, json={}).json()["archiveCode"]
+    card = app.state.store.card_by_archive_code(archive_code)
+    image_path = tmp_path / "data" / "Cards" / archive_code / "generated" / "ebay-search.jpg"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(b"jpeg")
+
+    search_id = app.state.store.start_ebay_search(card, image_path)
+    app.state.store.finish_ebay_search(search_id, "awaiting_manual_upload")
+    search = app.state.store.latest_ebay_search(archive_code)
+
+    assert search["search_id"] == search_id
+    assert search["mode"] == "browser_assisted"
+    assert search["status"] == "awaiting_manual_upload"

@@ -14,9 +14,11 @@ Windows companion program for the Ezcan iOS capture app.
 - Sequential archive codes in the `letter-digit-letter-digit` format, starting at `A0A0`.
 - Permanent card folders named with the archive code.
 - SQLite records and `manifest.json` files.
+- Prepared eBay search images generated from the archived front photo.
+- Visible browser-assisted eBay picture search launch from the recent-card table.
 - Local dashboard at `http://localhost:8765`.
 
-The eBay Picture Search, market research, and listing-draft screens are intentionally the next phase. The receiver is the foundation they use.
+The eBay picture-search step opens eBay in the default browser, copies the prepared image path, and records an `awaiting_manual_upload` search session. In eBay, click the camera icon at the far right of the search field and choose that image manually. Seller credentials, CAPTCHA handling, market research, and listing drafts remain intentionally outside this alpha slice.
 
 ## Run from source
 

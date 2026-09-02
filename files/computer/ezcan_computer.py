@@ -13,6 +13,7 @@ import threading
 import uuid
 import base64
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox, ttk
 from datetime import datetime, timezone
 from io import BytesIO
@@ -23,6 +24,9 @@ import qrcode
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+
+from ebay import open_picture_search
+from image_processor import prepare_search_image
 
 
 SEQUENTIAL_ARCHIVE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -206,6 +210,17 @@ class Store:
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     latest_code TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS ebay_searches (
+                    search_id TEXT PRIMARY KEY,
+                    internal_id TEXT NOT NULL,
+                    archive_code TEXT NOT NULL,
+                    prepared_image_path TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    error TEXT
+                );
                 """
             )
             columns = {row[1] for row in connection.execute("PRAGMA table_info(cards)")}
@@ -367,6 +382,43 @@ class Store:
     def recent_cards(self) -> list[sqlite3.Row]:
         with self.connection() as connection:
             return connection.execute("SELECT * FROM cards ORDER BY created_at DESC LIMIT 25").fetchall()
+
+    def card_by_archive_code(self, archive_code: str) -> sqlite3.Row | None:
+        with self.connection() as connection:
+            return connection.execute(
+                "SELECT * FROM cards WHERE archive_code = ?", (archive_code,)
+            ).fetchone()
+
+    def start_ebay_search(self, card: sqlite3.Row, image_path: Path) -> str:
+        search_id = str(uuid.uuid4())
+        now = utc_now()
+        with self.connection() as connection:
+            connection.execute(
+                "INSERT INTO ebay_searches (search_id, internal_id, archive_code, prepared_image_path, mode, status, started_at) VALUES (?, ?, ?, ?, 'browser_assisted', 'started', ?)",
+                (search_id, card["internal_id"], card["archive_code"], str(image_path), now),
+            )
+            connection.execute(
+                "UPDATE cards SET status = 'searching', updated_at = ? WHERE internal_id = ?",
+                (now, card["internal_id"]),
+            )
+        return search_id
+
+    def finish_ebay_search(self, search_id: str, status: str, error: str | None = None) -> None:
+        if status not in {"awaiting_manual_upload", "failed"}:
+            raise ValueError("Unsupported eBay search status")
+        now = utc_now()
+        with self.connection() as connection:
+            connection.execute(
+                "UPDATE ebay_searches SET status = ?, completed_at = ?, error = ? WHERE search_id = ?",
+                (status, now, error, search_id),
+            )
+
+    def latest_ebay_search(self, archive_code: str) -> sqlite3.Row | None:
+        with self.connection() as connection:
+            return connection.execute(
+                "SELECT * FROM ebay_searches WHERE archive_code = ? ORDER BY started_at DESC LIMIT 1",
+                (archive_code,),
+            ).fetchone()
 
     def shared_files(self) -> list[dict[str, object]]:
         files = []
@@ -610,6 +662,7 @@ class DesktopWindow:
         self.active_var = tk.StringVar(value="0")
         self.media_var = tk.StringVar(value="0")
         self.updated_var = tk.StringVar(value="Waiting for activity")
+        self.research_var = tk.StringVar(value="Select an archived card to search")
         self.qr_photo: tk.PhotoImage | None = None
         self.tree: ttk.Treeview
         self.build_styles()
@@ -807,8 +860,10 @@ class DesktopWindow:
         strip = tk.Frame(parent, bg=self.background)
         strip.grid_columnconfigure(0, weight=1)
         strip.grid_columnconfigure(1, weight=1)
+        strip.grid_columnconfigure(2, weight=1)
         self.action_line(strip, 0, "ARCHIVE", self.archive_var, "OPEN", self.open_archive, self.blue)
         self.action_line(strip, 1, "SEND TO IPHONE", self.transfer_var, "CHOOSE", self.choose_file_for_iphone, self.magenta)
+        self.action_line(strip, 2, "EBAY PICTURE SEARCH", self.research_var, "SEARCH", self.search_selected_card, self.green)
         return strip
 
     def action_line(self, parent: tk.Misc, column: int, title: str, value: tk.StringVar, button_text: str, command, accent: str) -> None:
@@ -851,6 +906,7 @@ class DesktopWindow:
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+        self.tree.bind("<Double-1>", lambda _event: self.search_selected_card())
         return frame
 
     def build_pairing_panel(self, parent: tk.Misc) -> tk.Frame:
@@ -1054,6 +1110,37 @@ class DesktopWindow:
             self.transfer_var.set(f"Ready to download: {destination.name}")
         except (OSError, ValueError) as error:
             messagebox.showerror("Send to iPhone", f"Could not queue that file.\n\n{error}")
+
+    def search_selected_card(self) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("eBay Picture Search", "Select an archived card first.")
+            return
+        values = self.tree.item(selected[0], "values")
+        archive_code = str(values[0]) if values else ""
+        card = self.store.card_by_archive_code(archive_code)
+        if card is None:
+            messagebox.showerror("eBay Picture Search", "That archived card is no longer available.")
+            return
+        search_id: str | None = None
+        try:
+            image_path = prepare_search_image(Path(card["folder_path"]))
+            search_id = self.store.start_ebay_search(card, image_path)
+            launch = open_picture_search(image_path, opener=webbrowser.open_new_tab)
+            self.store.finish_ebay_search(search_id, "awaiting_manual_upload")
+            self.root.clipboard_clear()
+            self.root.clipboard_append(str(launch.image_path))
+            self.research_var.set(f"{archive_code}: browser opened; image path copied")
+            messagebox.showinfo(
+                "eBay Picture Search",
+                "eBay is open. Click the camera icon in the search field, choose browse to a file, and select:\n\n"
+                f"{launch.image_path}\n\nThe image path is also copied to the clipboard.",
+            )
+        except (OSError, FileNotFoundError, ValueError) as error:
+            if search_id is not None:
+                self.store.finish_ebay_search(search_id, "failed", str(error))
+            self.research_var.set(f"{archive_code}: search preparation failed")
+            messagebox.showerror("eBay Picture Search", f"Could not prepare the search.\n\n{error}")
 
     def copy_text(self, value: str) -> None:
         self.root.clipboard_clear()
