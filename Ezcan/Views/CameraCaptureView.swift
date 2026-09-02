@@ -1,5 +1,4 @@
 import AVFoundation
-import SwiftUI
 import UIKit
 
 struct GuidedCameraView: UIViewControllerRepresentable {
@@ -51,6 +50,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
     private var isRecording = false
+    private var isConfigured = false
     private var hasFinished = false
 
     init(
@@ -79,7 +79,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 0.03, green: 0.05, blue: 0.08, alpha: 1)
-        configureView()
+        buildView()
         requestCameraAccess()
     }
 
@@ -91,12 +91,10 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         recordingTimer?.invalidate()
-        if session.isRunning {
-            session.stopRunning()
-        }
+        if session.isRunning { session.stopRunning() }
     }
 
-    private func configureView() {
+    private func buildView() {
         previewView.translatesAutoresizingMaskIntoConstraints = false
         previewView.backgroundColor = .black
         view.addSubview(previewView)
@@ -128,21 +126,14 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             guideView.heightAnchor.constraint(equalTo: guideView.widthAnchor, multiplier: 1.4)
         ])
 
-        let titleLabel = UILabel()
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.text = titleText.uppercased()
-        titleLabel.textColor = .white
-        titleLabel.font = .systemFont(ofSize: 27, weight: .bold)
-        titleLabel.textAlignment = .center
-        view.addSubview(titleLabel)
-
-        let subtitleLabel = UILabel()
-        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
-        subtitleLabel.text = mode == .photo ? "Fit the whole card inside the corners" : "Move slowly around the card surface"
+        let titleLabel = makeLabel(titleText.uppercased(), size: 27, weight: .bold)
+        let subtitleLabel = makeLabel(
+            mode == .photo ? "Fit the whole card inside the corners" : "Move slowly around the card surface",
+            size: 14,
+            weight: .medium
+        )
         subtitleLabel.textColor = UIColor.white.withAlphaComponent(0.82)
-        subtitleLabel.font = .systemFont(ofSize: 14, weight: .medium)
-        subtitleLabel.textAlignment = .center
-        view.addSubview(subtitleLabel)
+        subtitleLabel.numberOfLines = 0
 
         timerLabel.translatesAutoresizingMaskIntoConstraints = false
         timerLabel.text = "00:00"
@@ -155,8 +146,9 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         statusLabel.text = "Preparing camera..."
         statusLabel.textColor = UIColor.white.withAlphaComponent(0.8)
-        statusLabel.font = .systemFont(ofSize: 13, weight: .regular)
+        statusLabel.font = .systemFont(ofSize: 13)
         statusLabel.textAlignment = .center
+        statusLabel.numberOfLines = 0
         view.addSubview(statusLabel)
 
         let backButton = makeButton(title: "Back", imageName: "chevron.left")
@@ -178,21 +170,25 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         captureButton.layer.cornerRadius = 38
         captureButton.layer.borderWidth = 5
         captureButton.layer.borderColor = UIColor.white.withAlphaComponent(0.35).cgColor
-        captureButton.addAction(UIAction { [weak self] _ in self?.captureButtonPressed(captureButton) }, for: .touchUpInside)
+        captureButton.addAction(UIAction { [weak self, weak captureButton] _ in
+            guard let captureButton else { return }
+            self?.capturePressed(captureButton)
+        }, for: .touchUpInside)
         view.addSubview(captureButton)
 
-        let bottomHint = UILabel()
-        bottomHint.translatesAutoresizingMaskIntoConstraints = false
-        bottomHint.text = mode == .photo ? "Photo will be cropped with an approx. 1 cm border" : "1080p HD video • up to 30 seconds"
-        bottomHint.textColor = UIColor.white.withAlphaComponent(0.75)
-        bottomHint.font = .systemFont(ofSize: 12, weight: .medium)
-        bottomHint.textAlignment = .center
-        view.addSubview(bottomHint)
+        let hint = makeLabel(
+            mode == .photo ? "Photo includes an approximate 1 cm border" : "1080p HD video, up to 30 seconds",
+            size: 12,
+            weight: .medium
+        )
+        hint.textColor = UIColor.white.withAlphaComponent(0.75)
 
         NSLayoutConstraint.activate([
             titleLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 18),
             titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
+            subtitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            subtitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             subtitleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             timerLabel.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 8),
             timerLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -209,9 +205,20 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             captureButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -50),
             captureButton.widthAnchor.constraint(equalToConstant: 76),
             captureButton.heightAnchor.constraint(equalToConstant: 76),
-            bottomHint.topAnchor.constraint(equalTo: captureButton.bottomAnchor, constant: 12),
-            bottomHint.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+            hint.topAnchor.constraint(equalTo: captureButton.bottomAnchor, constant: 12),
+            hint.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         ])
+    }
+
+    private func makeLabel(_ text: String, size: CGFloat, weight: UIFont.Weight) -> UILabel {
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = text
+        label.textColor = .white
+        label.font = .systemFont(ofSize: size, weight: weight)
+        label.textAlignment = .center
+        view.addSubview(label)
+        return label
     }
 
     private func makeButton(title: String, imageName: String) -> UIButton {
@@ -220,11 +227,6 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         configuration.image = UIImage(systemName: imageName)
         configuration.imagePadding = 5
         configuration.baseForegroundColor = .white
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var updated = attributes
-            updated.font = .systemFont(ofSize: 15, weight: .semibold)
-            return updated
-        }
         let button = UIButton(configuration: configuration)
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
@@ -250,6 +252,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     private func configureSession() {
+        guard !isConfigured else { return }
         session.beginConfiguration()
         session.sessionPreset = mode == .photo ? .photo : .hd1920x1080
         defer { session.commitConfiguration() }
@@ -263,11 +266,17 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         session.addInput(videoInput)
 
         if mode == .photo {
-            guard session.canAddOutput(photoOutput) else { return }
+            guard session.canAddOutput(photoOutput) else {
+                statusLabel.text = "Photo capture is unavailable"
+                return
+            }
             session.addOutput(photoOutput)
             photoOutput.isHighResolutionCaptureEnabled = true
         } else {
-            guard session.canAddOutput(movieOutput) else { return }
+            guard session.canAddOutput(movieOutput) else {
+                statusLabel.text = "Video capture is unavailable"
+                return
+            }
             session.addOutput(movieOutput)
             if let microphone = AVCaptureDevice.default(for: .audio),
                let audioInput = try? AVCaptureDeviceInput(device: microphone),
@@ -276,6 +285,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             }
         }
 
+        isConfigured = true
         let layer = AVCaptureVideoPreviewLayer(session: session)
         layer.videoGravity = .resizeAspectFill
         previewView.layer.addSublayer(layer)
@@ -288,12 +298,11 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     private func setPortraitOrientation() {
-        if let connection = previewLayer?.connection, connection.isVideoOrientationSupported {
-            connection.videoOrientation = .portrait
-        }
+        guard let connection = previewLayer?.connection, connection.isVideoOrientationSupported else { return }
+        connection.videoOrientation = .portrait
     }
 
-    private func captureButtonPressed(_ button: UIButton) {
+    private func capturePressed(_ button: UIButton) {
         if mode == .photo {
             capturePhoto()
         } else if isRecording {
@@ -328,10 +337,8 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self, weak button] _ in
             guard let self, let started = self.recordingStartedAt else { return }
             let elapsed = Date().timeIntervalSince(started)
-            self.timerLabel.text = Self.format(seconds: elapsed)
-            if elapsed >= 30 {
-                self.stopRecording(button)
-            }
+            self.timerLabel.text = Self.timeString(elapsed)
+            if elapsed >= 30 { self.stopRecording(button) }
         }
     }
 
@@ -367,8 +374,8 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         guard error == nil,
               let data = photo.fileDataRepresentation(),
               let image = UIImage(data: data),
-              let croppedData = cropCard(image: image),
-              let url = save(data: croppedData, extension: "jpg") else {
+              let jpegData = image.jpegData(compressionQuality: 0.9),
+              let url = save(jpegData, extension: "jpg") else {
             statusLabel.text = "Could not capture photo"
             return
         }
@@ -392,45 +399,10 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         onVideo(CapturedMedia(fileURL: outputFileURL, kind: .video, fileName: outputFileURL.lastPathComponent))
     }
 
-    private func cropCard(image: UIImage) -> Data? {
-        let normalizedImage = UIGraphicsImageRenderer(size: image.size).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: image.size))
-        }
-        guard let cgImage = normalizedImage.cgImage,
-              let previewLayer else { return normalizedImage.jpegData(compressionQuality: 0.9) }
-
-        let guide = guideView.convert(guideView.bounds, to: previewView)
-        let margin = guide.width * 0.1575
-        let cropGuide = guide.insetBy(dx: -margin, dy: -margin)
-        let topLeft = previewLayer.captureDevicePointConverted(fromLayerPoint: cropGuide.origin)
-        let bottomRight = previewLayer.captureDevicePointConverted(
-            fromLayerPoint: CGPoint(x: cropGuide.maxX, y: cropGuide.maxY)
-        )
-        let normalizedRect = CGRect(
-            x: min(topLeft.x, bottomRight.x),
-            y: min(topLeft.y, bottomRight.y),
-            width: abs(bottomRight.x - topLeft.x),
-            height: abs(bottomRight.y - topLeft.y)
-        ).intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
-        guard normalizedRect.width > 0.05, normalizedRect.height > 0.05 else {
-            return normalizedImage.jpegData(compressionQuality: 0.9)
-        }
-        let pixelRect = CGRect(
-            x: normalizedRect.minX * CGFloat(cgImage.width),
-            y: normalizedRect.minY * CGFloat(cgImage.height),
-            width: normalizedRect.width * CGFloat(cgImage.width),
-            height: normalizedRect.height * CGFloat(cgImage.height)
-        ).integral
-        guard let cropped = cgImage.cropping(to: pixelRect) else {
-            return normalizedImage.jpegData(compressionQuality: 0.9)
-        }
-        return UIImage(cgImage: cropped).jpegData(compressionQuality: 0.9)
-    }
-
-    private func save(data: Data, extension: String) -> URL? {
+    private func save(_ data: Data, extension fileExtension: String) -> URL? {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension(`extension`)
+            .appendingPathExtension(fileExtension)
         do {
             try data.write(to: url, options: .atomic)
             return url
@@ -439,7 +411,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         }
     }
 
-    private static func format(seconds: TimeInterval) -> String {
+    private static func timeString(_ seconds: TimeInterval) -> String {
         let total = Int(seconds)
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
@@ -458,10 +430,10 @@ final class CardGuideView: UIView {
             (CGPoint(x: 0, y: rect.height - length), CGPoint(x: 0, y: rect.height), CGPoint(x: length, y: rect.height)),
             (CGPoint(x: rect.width - length, y: rect.height), CGPoint(x: rect.width, y: rect.height), CGPoint(x: rect.width, y: rect.height - length))
         ]
-        for (first, corner, last) in corners {
-            context.move(to: first)
+        for (start, corner, end) in corners {
+            context.move(to: start)
             context.addLine(to: corner)
-            context.addLine(to: last)
+            context.addLine(to: end)
         }
         context.strokePath()
     }
