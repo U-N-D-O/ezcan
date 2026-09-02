@@ -1,4 +1,5 @@
 import AVFoundation
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -52,6 +53,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private let movieOutput = AVCaptureMovieFileOutput()
     private let videoDataOutput = AVCaptureVideoDataOutput()
     private let analysisQueue = DispatchQueue(label: "com.undu.ezcan.camera-analysis")
+    private let photoProcessingQueue = DispatchQueue(label: "com.undu.ezcan.photo-processing", qos: .userInitiated)
     private let previewView = UIView()
     private let guideView = CardGuideView()
     private let timerLabel = UILabel()
@@ -72,6 +74,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private var standardFrames = 0
     private var nextAutomaticSwitchDate = Date.distantPast
     private var pendingCropRect: CGRect?
+    private var photoCaptureInFlight = false
 
     init(
         title: String,
@@ -567,10 +570,11 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     private func capturePhoto() {
-        guard !hasFinished else { return }
+        guard !hasFinished, !photoCaptureInFlight else { return }
+        photoCaptureInFlight = true
         pendingCropRect = previewCropRect()
         let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
-        settings.isHighResolutionPhotoEnabled = true
+        settings.isHighResolutionPhotoEnabled = false
         settings.photoQualityPrioritization = .quality
         if let connection = photoOutput.connection(with: .video), connection.isVideoStabilizationSupported {
             connection.preferredVideoStabilizationMode = .auto
@@ -638,48 +642,72 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard error == nil,
-              let data = photo.fileDataRepresentation(),
-              let image = UIImage(data: data),
-              let croppedImage = Self.crop(image, to: pendingCropRect),
-              let jpegData = croppedImage.jpegData(compressionQuality: 0.98),
-              let url = save(jpegData, extension: "jpg") else {
-            updateStatus("Could not capture photo")
+        guard error == nil, let data = photo.fileDataRepresentation() else {
+            DispatchQueue.main.async { [weak self] in
+                self?.photoCaptureInFlight = false
+                self?.updateStatus("Could not capture photo")
+            }
             return
         }
         hasFinished = true
-        sessionQueue.async { [weak self] in
-            self?.session.stopRunning()
-            DispatchQueue.main.async { [weak self] in
-                self?.onPhoto(CapturedMedia(fileURL: url, kind: .image, fileName: url.lastPathComponent))
+        let cropRect = pendingCropRect
+        photoProcessingQueue.async { [weak self] in
+            autoreleasepool {
+                guard let self,
+                      let jpegData = Self.processPhotoData(data, cropRect: cropRect),
+                      let url = self.save(jpegData, extension: "jpg") else {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.photoCaptureInFlight = false
+                        self?.updateStatus("Could not process photo")
+                    }
+                    return
+                }
+                self.sessionQueue.async { [weak self] in
+                    self?.session.stopRunning()
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.photoCaptureInFlight = false
+                        self.onPhoto(CapturedMedia(fileURL: url, kind: .image, fileName: url.lastPathComponent))
+                    }
+                }
             }
         }
     }
 
-    private static func crop(_ image: UIImage, to normalizedRect: CGRect?) -> UIImage? {
-        let uprightImage: UIImage
-        if image.imageOrientation == .up {
-            uprightImage = image
-        } else {
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = image.scale
-            format.opaque = true
-            uprightImage = UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
-                image.draw(in: CGRect(origin: .zero, size: image.size))
-            }
-        }
+    private static func processPhotoData(_ data: Data, cropRect: CGRect?) -> Data? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 2400
+                ] as CFDictionary
+              ) else { return nil }
 
-        guard let normalizedRect,
-              let source = uprightImage.cgImage else { return uprightImage }
+        let croppedImage = crop(image, to: cropRect)
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(
+            destination,
+            croppedImage,
+            [kCGImageDestinationLossyCompressionQuality: 0.94] as CFDictionary
+        )
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output as Data
+    }
+
+    private static func crop(_ image: CGImage, to normalizedRect: CGRect?) -> CGImage {
+        guard let normalizedRect else { return image }
         let pixelRect = CGRect(
-            x: normalizedRect.minX * CGFloat(source.width),
-            y: normalizedRect.minY * CGFloat(source.height),
-            width: normalizedRect.width * CGFloat(source.width),
-            height: normalizedRect.height * CGFloat(source.height)
-        ).integral.intersection(CGRect(x: 0, y: 0, width: source.width, height: source.height))
-        guard pixelRect.width > 32, pixelRect.height > 32,
-              let cropped = source.cropping(to: pixelRect) else { return uprightImage }
-        return UIImage(cgImage: cropped, scale: uprightImage.scale, orientation: .up)
+            x: normalizedRect.minX * CGFloat(image.width),
+            y: normalizedRect.minY * CGFloat(image.height),
+            width: normalizedRect.width * CGFloat(image.width),
+            height: normalizedRect.height * CGFloat(image.height)
+        ).integral.intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard pixelRect.width > 32, pixelRect.height > 32 else { return image }
+        return image.cropping(to: pixelRect) ?? image
     }
 
     func fileOutput(
