@@ -9,6 +9,7 @@ struct PairingView: View {
     @State private var computerName = ""
     @State private var scannerPresented = false
     @State private var hasOpenedScanner = false
+    @State private var logPresented = false
 
     var body: some View {
         NavigationStack {
@@ -48,6 +49,9 @@ struct PairingView: View {
                 } onCancel: {
                     scannerPresented = false
                 }
+            }
+            .sheet(isPresented: $logPresented) {
+                CrashLogView()
             }
             .onAppear {
                 guard !hasOpenedScanner else { return }
@@ -100,13 +104,29 @@ struct PairingView: View {
                     .padding(.vertical, 15)
             }
             .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.cyan))
-            EzcanSoftControl(tint: EzcanTheme.blue) {
-                HStack(spacing: 8) {
-                    Image(systemName: "lock.shield")
-                    Text("PRIVATE NETWORK")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+            HStack(spacing: 10) {
+                EzcanSoftControl(tint: EzcanTheme.blue) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "lock.shield")
+                        Text("PRIVATE NETWORK")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(EzcanTheme.blue)
                 }
-                .foregroundStyle(EzcanTheme.blue)
+                Button {
+                    logPresented = true
+                } label: {
+                    Label("LOG", systemImage: "doc.text.magnifyingglass")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(EzcanTheme.pink)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 13)
+                        .background(EzcanTheme.white, in: Capsule())
+                        .overlay { Capsule().stroke(EzcanTheme.pink.opacity(0.28), lineWidth: 1) }
+                        .shadow(color: EzcanTheme.shadow, radius: 8, y: 4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Show the latest crash and activity log")
             }
         }
         .padding(22)

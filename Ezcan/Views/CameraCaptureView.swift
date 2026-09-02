@@ -636,7 +636,11 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        if let error {
+            CrashReporter.shared.record("Photo capture failed: \(error.localizedDescription)")
+        }
         guard error == nil, let data = photo.fileDataRepresentation() else {
+            CrashReporter.shared.record("Photo data was unavailable")
             DispatchQueue.main.async { [weak self] in
                 self?.hasFinished = false
                 self?.photoCaptureInFlight = false
@@ -644,11 +648,12 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             }
             return
         }
-        CrashReporter.shared.record("Photo captured; saving JPEG")
+        CrashReporter.shared.record("Photo captured; received \(data.count) bytes; saving JPEG")
         photoProcessingQueue.async { [weak self] in
             autoreleasepool {
                 guard let self,
                       let url = self.save(data, extension: "jpg") else {
+                    CrashReporter.shared.record("Photo JPEG could not be saved")
                     DispatchQueue.main.async { [weak self] in
                         self?.hasFinished = false
                         self?.photoCaptureInFlight = false

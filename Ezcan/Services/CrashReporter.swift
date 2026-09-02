@@ -51,9 +51,23 @@ final class CrashReporter {
         } else {
             report = "The previous session ended unexpectedly, but no additional details were saved."
         }
+        if !FileManager.default.fileExists(atPath: reportURL.path) {
+            try? report.write(to: reportURL, atomically: true, encoding: .utf8)
+        }
         try? FileManager.default.removeItem(at: sessionURL)
-        try? FileManager.default.removeItem(at: reportURL)
         return CrashReport(message: report)
+    }
+
+    func currentLog() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        if let report = try? String(contentsOf: reportURL, encoding: .utf8), !report.isEmpty {
+            return report
+        }
+        if let session = try? String(contentsOf: sessionURL, encoding: .utf8), !session.isEmpty {
+            return "No crash report has been recorded for this session.\n\nCurrent activity:\n\(session)"
+        }
+        return "No crash report has been recorded yet."
     }
 
     func markBackgrounded() {
