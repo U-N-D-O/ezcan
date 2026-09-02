@@ -485,17 +485,17 @@ def create_app(data_root: Path | None = None) -> FastAPI:
 
 
 class DesktopWindow:
-    background = "#f1f6f7"
+    background = "#eef2f6"
     panel = "#ffffff"
     panel_alt = "#f5fbfb"
     panel_deep = "#f8fbfb"
     border = "#d8e4e6"
     border_bright = "#12c7d1"
-    text = "#20333b"
-    muted = "#70838a"
+    text = "#102033"
+    muted = "#6d7d8c"
     cyan = "#12c7d1"
-    blue = "#4388ee"
-    magenta = "#e45c85"
+    blue = "#006bb3"
+    magenta = "#d94d78"
     green = "#32c77b"
     amber = "#eab849"
 
@@ -617,34 +617,83 @@ class DesktopWindow:
         hover_color: str,
         foreground: str = "white",
     ) -> tk.Canvas:
+        height = 52
         button = tk.Canvas(
             parent,
             width=width,
-            height=38,
+            height=height,
             bg=parent.cget("bg"),
             bd=0,
             highlightthickness=0,
             cursor="hand2",
         )
+        state = {"hover": False, "lift": 0.0, "shine": -130, "motion_job": None, "shine_job": None}
 
-        def paint(fill: str) -> None:
+        def rounded_shape(left: float, top: float, right: float, bottom: float, fill: str, outline: str = "") -> None:
+            radius = (bottom - top) / 2
+            button.create_rectangle(left + radius, top, right - radius, bottom, fill=fill, outline=outline)
+            button.create_rectangle(left, top + radius, right, bottom - radius, fill=fill, outline=outline)
+            button.create_oval(left, top, left + radius * 2, bottom, fill=fill, outline=outline)
+            button.create_oval(right - radius * 2, top, right, bottom, fill=fill, outline=outline)
+
+        def paint(fill: str, lift: float) -> None:
             button.delete("all")
-            radius = 18
-            button.create_rectangle(radius, 1, width - radius, 37, fill=self.border, outline=self.border)
-            button.create_rectangle(2, radius, width - 2, 38 - radius, fill=self.border, outline=self.border)
-            button.create_oval(2, 1, radius * 2 + 2, 37, fill=self.border, outline=self.border)
-            button.create_oval(width - radius * 2 - 2, 1, width - 2, 37, fill=self.border, outline=self.border)
-            button.create_rectangle(radius, 3, width - radius, 34, fill=fill, outline=fill)
-            button.create_rectangle(4, radius, width - 4, 34 - radius, fill=fill, outline=fill)
-            button.create_oval(4, 3, radius * 2, 34, fill=fill, outline=fill)
-            button.create_oval(width - radius * 2, 3, width - 4, 34, fill=fill, outline=fill)
-            button.create_line(radius + 4, 4, width - radius - 4, 4, fill="#ffffff", stipple="gray50")
-            button.create_line(radius + 4, 34, width - radius - 4, 34, fill="#c5dadd")
-            button.create_text(width // 2, 20, text=text, fill=foreground, font=("Segoe UI Semibold", 9))
+            inset = 3 - (2 * lift)
+            top = 7 - (3 * lift)
+            bottom = height - 5 - (3 * lift)
+            rounded_shape(inset + 2, top + 5, width - inset + 2, bottom + 5, "#b7c4d0")
+            rounded_shape(inset, top, width - inset, bottom, "#d7e5f0", "#ffffff")
+            rounded_shape(inset + 3, top + 3, width - inset - 3, bottom - 3, fill)
+            shine = button.create_polygon(
+                state["shine"], top + 2,
+                state["shine"] + 22, top + 2,
+                state["shine"] + 70, bottom - 2,
+                state["shine"] + 48, bottom - 2,
+                fill="#ffffff",
+                outline="",
+                stipple="gray50",
+                tags="shine",
+            )
+            button.create_text(width // 2 - 7, height // 2 - (2 * lift), text=text, fill=foreground, font=("Segoe UI", 10, "bold"), tags="label")
+            button.tag_lower(shine, "label")
+            button.create_text(width - 22 + (4 * lift), height // 2 - (2 * lift), text="→", fill=foreground, font=("Segoe UI", 16, "bold"), tags="icon")
 
-        paint(color)
-        button.bind("<Enter>", lambda _event: paint(hover_color))
-        button.bind("<Leave>", lambda _event: paint(color))
+        def animate(target: float) -> None:
+            current = state["lift"]
+            if abs(current - target) < 0.02:
+                state["lift"] = target
+                paint(hover_color if state["hover"] else color, target)
+                return
+            state["lift"] = current + (target - current) * 0.45
+            paint(hover_color if state["hover"] else color, state["lift"])
+            state["motion_job"] = button.after(16, lambda: animate(target))
+
+        def shine_pass() -> None:
+            if not state["hover"]:
+                state["shine"] = -130
+                return
+            state["shine"] += 9
+            if state["shine"] > width + 40:
+                state["shine"] = -130
+            paint(hover_color, state["lift"])
+            state["shine_job"] = button.after(32, shine_pass)
+
+        def enter(_event: tk.Event) -> None:
+            state["hover"] = True
+            animate(1.0)
+            if state["shine_job"] is None:
+                shine_pass()
+
+        def leave(_event: tk.Event) -> None:
+            state["hover"] = False
+            if state["shine_job"] is not None:
+                button.after_cancel(state["shine_job"])
+                state["shine_job"] = None
+            animate(0.0)
+
+        paint(color, 0.0)
+        button.bind("<Enter>", enter)
+        button.bind("<Leave>", leave)
         button.bind("<Button-1>", lambda _event: command())
         return button
 
@@ -695,6 +744,7 @@ class DesktopWindow:
         address_label.pack(anchor="w", pady=(0, 5))
         address_label.bind("<Button-1>", lambda _event: self.copy_text(self.address))
         tk.Label(content, text="Tap the address to copy it", bg=self.background, fg=self.muted, font=("Segoe UI", 8)).pack(anchor="w")
+        self.rounded_button(content, "COPY ADDRESS", lambda: self.copy_text(self.address), 172, self.blue, "#178ed0").pack(anchor="w", pady=(16, 0))
         return frame
 
     def build_action_strip(self, parent: tk.Misc) -> tk.Frame:
@@ -713,7 +763,7 @@ class DesktopWindow:
         details.pack(side="left", fill="x", expand=True)
         tk.Label(details, text=title, bg=self.background, fg=accent, font=("Consolas", 8, "bold")).pack(anchor="w")
         tk.Label(details, textvariable=value, bg=self.background, fg=self.text, font=("Segoe UI", 9), anchor="w").pack(anchor="w", pady=(4, 0))
-        self.rounded_button(line, button_text, command, 92, accent, accent, foreground=self.text).pack(side="right", pady=4)
+        self.rounded_button(line, button_text, command, 112, accent, accent, foreground="#ffffff").pack(side="right", pady=1)
 
     def action_tile(self, parent: tk.Misc, column: int, title: str, value: tk.StringVar, button_text: str, command, accent: str, icon: str) -> None:
         frame, content = self.raised_surface(parent, accent)
