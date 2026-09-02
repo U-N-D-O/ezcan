@@ -92,14 +92,16 @@ class EzcanIPABuilder:
 
         activation_row = tk.Frame(outer, bg=WHITE)
         activation_row.pack(pady=(0, 20))
-        self.activate_button = tk.Canvas(activation_row, width=230, height=86, bg=WHITE, highlightthickness=0, cursor="hand2")
+        self.activate_hover = False
+        self.activate_pressed = False
+        self.activate_active = False
+        self.activate_button = tk.Canvas(activation_row, width=110, height=124, bg=WHITE, highlightthickness=0, cursor="hand2")
         self.activate_button.pack()
-        self.activate_button.create_oval(12, 8, 218, 78, fill=GREEN_PALE, outline=GREEN, width=1)
-        self.activate_icon = self.activate_button.create_text(50, 43, text="\u23fb", fill=GREEN, font=("Segoe UI Symbol", 25, "bold"))
-        self.activate_label = self.activate_button.create_text(132, 43, text="ACTIVATE BUILD", fill=GREEN, font=("Segoe UI", 11, "bold"))
-        self.activate_button.bind("<Button-1>", lambda _event: self.start())
-        self.activate_button.bind("<Enter>", lambda _event: self.activate_button.itemconfigure(self.activate_icon, fill="#22b970"))
-        self.activate_button.bind("<Leave>", lambda _event: self.activate_button.itemconfigure(self.activate_icon, fill=GREEN))
+        self.paint_activate_button()
+        self.activate_button.bind("<Enter>", self.activate_enter)
+        self.activate_button.bind("<Leave>", self.activate_leave)
+        self.activate_button.bind("<ButtonPress-1>", self.activate_press)
+        self.activate_button.bind("<ButtonRelease-1>", self.activate_release)
 
         log_header = tk.Frame(outer, bg=WHITE)
         log_header.pack(fill="x")
@@ -130,6 +132,58 @@ class EzcanIPABuilder:
     def close(self):
         self.window.destroy()
 
+    def paint_activate_button(self):
+        self.activate_button.delete("all")
+        center_x, center_y = 55, 43
+        offset = 2 if self.activate_pressed else 0
+        face = "#7e929d" if self.activate_active else ("#31dbe4" if self.activate_hover else CYAN)
+        border = "#617681" if self.activate_active else "#0a9ba7"
+        self.activate_button.create_oval(13, 2, 97, 86, fill=CYAN_PALE, outline="#b7dfe1", width=1)
+        self.activate_button.create_oval(19, 10 + offset, 91, 82 + offset, fill="#6f818d", outline="")
+        self.activate_button.create_oval(19, 6 + offset, 91, 78 + offset, fill=face, outline=border, width=1)
+        self.activate_button.create_arc(23, 10 + offset, 87, 74 + offset, start=28, extent=124, style="arc", outline="#7ae7eb", width=4)
+        self.activate_button.create_arc(23, 10 + offset, 87, 74 + offset, start=205, extent=112, style="arc", outline="#087d87", width=4)
+        scale = 0.92 if self.activate_pressed else 1.0
+        half_width = 12 * scale
+        half_height = 15 * scale
+        self.activate_icon = self.activate_button.create_polygon(
+            center_x - half_width,
+            center_y - half_height + offset,
+            center_x - half_width,
+            center_y + half_height + offset,
+            center_x + half_width,
+            center_y + offset,
+            fill="#e9ffff" if not self.activate_active else "#d2dadd",
+            outline="",
+        )
+        self.activate_label = self.activate_button.create_text(
+            center_x,
+            106,
+            text="BUILD IPA",
+            fill=self.muted if self.activate_active else CYAN,
+            font=("Segoe UI", 8, "bold"),
+        )
+
+    def activate_enter(self, _event):
+        self.activate_hover = True
+        self.paint_activate_button()
+
+    def activate_leave(self, _event):
+        self.activate_hover = False
+        self.activate_pressed = False
+        self.paint_activate_button()
+
+    def activate_press(self, _event):
+        self.activate_pressed = True
+        self.paint_activate_button()
+
+    def activate_release(self, _event):
+        was_pressed = self.activate_pressed
+        self.activate_pressed = False
+        self.paint_activate_button()
+        if was_pressed:
+            self.start()
+
     def update_dial(self, percent, state, detail):
         self.dial.itemconfigure(self.dial_arc, extent=-3.6 * percent)
         self.dial.itemconfigure(self.dial_percent, text="{}%".format(int(percent)))
@@ -139,10 +193,9 @@ class EzcanIPABuilder:
         self.progress.coords(self.progress_fill, 0, 0, width * percent / 100, 5)
 
     def set_activation_state(self, active):
-        color = MUTED if active else GREEN
+        self.activate_active = active
         self.activate_button.configure(cursor="watch" if active else "hand2")
-        self.activate_button.itemconfigure(self.activate_icon, fill=color)
-        self.activate_button.itemconfigure(self.activate_label, fill=color)
+        self.paint_activate_button()
 
     def write_log(self, message):
         self.events.put(("log", message))
