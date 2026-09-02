@@ -4,6 +4,7 @@ struct PairingView: View {
     @EnvironmentObject private var pairingStore: PairingStore
     let onPaired: () -> Void
 
+    @StateObject private var networkMonitor = NetworkStatusMonitor()
     @State private var computerURL = "http://"
     @State private var token = ""
     @State private var computerName = ""
@@ -62,28 +63,31 @@ struct PairingView: View {
     }
 
     private var pairingInstrument: some View {
+        let isOffline = networkMonitor.isOffline
+        let accent = isOffline ? EzcanTheme.pink : EzcanTheme.cyan
+
         VStack(spacing: 14) {
-            EzcanInstrumentRing(progress: 0.68, accent: EzcanTheme.cyan) {
+            EzcanInstrumentRing(progress: isOffline ? 1.0 / 3.0 : 2.0 / 3.0, accent: accent) {
                 VStack(spacing: 6) {
-                    Image(systemName: "antenna.radiowaves.left.and.right")
+                    Image(systemName: isOffline ? "wifi.slash" : "antenna.radiowaves.left.and.right")
                         .font(.system(size: 25, weight: .medium))
-                        .foregroundStyle(EzcanTheme.cyan)
-                    Text("PAIR")
+                        .foregroundStyle(accent)
+                    Text(isOffline ? "OFFLINE" : "PAIR")
                         .font(.system(size: 20, weight: .black, design: .rounded))
                         .foregroundStyle(EzcanTheme.ink)
-                    Text("SCANNER READY")
+                    Text(isOffline ? "NETWORK LOST" : "SCANNER READY")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                         .foregroundStyle(EzcanTheme.muted)
                 }
             }
             Text("Connect a trusted capture station")
                 .font(.caption)
-                .foregroundStyle(EzcanTheme.muted)
+                .foregroundStyle(isOffline ? EzcanTheme.pink : EzcanTheme.muted)
         }
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
         .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(EzcanTheme.cyan.opacity(0.35), lineWidth: 1) }
+        .overlay { RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(accent.opacity(0.35), lineWidth: 1) }
         .shadow(color: EzcanTheme.shadow, radius: 14, y: 7)
     }
 
