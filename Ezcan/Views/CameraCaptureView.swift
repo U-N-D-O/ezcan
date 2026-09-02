@@ -41,6 +41,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private let onCancel: () -> Void
 
     private let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "com.undu.ezcan.camera-session")
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
     private let previewView = UIView()
@@ -92,7 +93,10 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         recordingTimer?.invalidate()
-        if session.isRunning { session.stopRunning() }
+        sessionQueue.async { [weak self] in
+            guard let self, self.session.isRunning else { return }
+            self.session.stopRunning()
+        }
     }
 
     private func buildView() {
@@ -253,48 +257,62 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     private func configureSession() {
-        guard !isConfigured else { return }
-        session.beginConfiguration()
-        session.sessionPreset = mode == .photo ? .photo : .hd1920x1080
-        defer { session.commitConfiguration() }
+        sessionQueue.async { [weak self] in
+            guard let self, !self.isConfigured else { return }
+            self.session.beginConfiguration()
+            self.session.sessionPreset = self.mode == .photo ? .photo : .hd1920x1080
 
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-              let videoInput = try? AVCaptureDeviceInput(device: camera),
-              session.canAddInput(videoInput) else {
-            statusLabel.text = "No camera is available"
-            return
-        }
-        session.addInput(videoInput)
-
-        if mode == .photo {
-            guard session.canAddOutput(photoOutput) else {
-                statusLabel.text = "Photo capture is unavailable"
+            guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                  let videoInput = try? AVCaptureDeviceInput(device: camera),
+                  self.session.canAddInput(videoInput) else {
+                self.session.commitConfiguration()
+                self.updateStatus("No camera is available")
                 return
             }
-            session.addOutput(photoOutput)
-            photoOutput.isHighResolutionCaptureEnabled = true
-        } else {
-            guard session.canAddOutput(movieOutput) else {
-                statusLabel.text = "Video capture is unavailable"
-                return
-            }
-            session.addOutput(movieOutput)
-            if let microphone = AVCaptureDevice.default(for: .audio),
-               let audioInput = try? AVCaptureDeviceInput(device: microphone),
-               session.canAddInput(audioInput) {
-                session.addInput(audioInput)
-            }
-        }
+            self.session.addInput(videoInput)
 
-        isConfigured = true
-        let layer = AVCaptureVideoPreviewLayer(session: session)
-        layer.videoGravity = .resizeAspectFill
-        previewView.layer.addSublayer(layer)
-        previewLayer = layer
-        setPortraitOrientation()
-        statusLabel.text = "Ready"
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.startRunning()
+            if self.mode == .photo {
+                guard self.session.canAddOutput(self.photoOutput) else {
+                    self.session.commitConfiguration()
+                    self.updateStatus("Photo capture is unavailable")
+                    return
+                }
+                self.session.addOutput(self.photoOutput)
+                self.photoOutput.isHighResolutionCaptureEnabled = true
+            } else {
+                guard self.session.canAddOutput(self.movieOutput) else {
+                    self.session.commitConfiguration()
+                    self.updateStatus("Video capture is unavailable")
+                    return
+                }
+                self.session.addOutput(self.movieOutput)
+                if let microphone = AVCaptureDevice.default(for: .audio),
+                   let audioInput = try? AVCaptureDeviceInput(device: microphone),
+                   self.session.canAddInput(audioInput) {
+                    self.session.addInput(audioInput)
+                }
+            }
+
+            self.session.commitConfiguration()
+            self.isConfigured = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let layer = AVCaptureVideoPreviewLayer(session: self.session)
+                layer.videoGravity = .resizeAspectFill
+                self.previewView.layer.addSublayer(layer)
+                self.previewLayer = layer
+                self.view.setNeedsLayout()
+                self.view.layoutIfNeeded()
+                self.setPortraitOrientation()
+                self.statusLabel.text = "Ready"
+            }
+            self.session.startRunning()
+        }
+    }
+
+    private func updateStatus(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.statusLabel.text = message
         }
     }
 
@@ -419,6 +437,20 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
 }
 
 final class CardGuideView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+    }
+
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let length = min(rect.width, rect.height) * 0.16

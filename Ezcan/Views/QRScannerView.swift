@@ -30,6 +30,7 @@ struct QRScannerView: UIViewControllerRepresentable {
 final class QRScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
     private let coordinator: QRScannerView.Coordinator
     private let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "com.undu.ezcan.qr-session")
     private let previewView = UIView()
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var isConfigured = false
@@ -58,8 +59,9 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        if session.isRunning {
-            session.stopRunning()
+        sessionQueue.async { [weak self] in
+            guard let self, self.session.isRunning else { return }
+            self.session.stopRunning()
         }
     }
 
@@ -157,29 +159,46 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
     }
 
     private func configureScanner() {
-        guard !isConfigured,
-              let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-              let input = try? AVCaptureDeviceInput(device: camera),
-              session.canAddInput(input) else {
-            showCameraMessage("No camera is available")
-            return
-        }
-        let output = AVCaptureMetadataOutput()
-        guard session.canAddOutput(output) else {
-            showCameraMessage("QR scanning is unavailable")
-            return
-        }
-        isConfigured = true
-        session.addInput(input)
-        session.addOutput(output)
-        output.setMetadataObjectsDelegate(self, queue: .main)
-        output.metadataObjectTypes = [.qr]
+        sessionQueue.async { [weak self] in
+            guard let self, !self.isConfigured else { return }
+            guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                  let input = try? AVCaptureDeviceInput(device: camera),
+                  self.session.canAddInput(input) else {
+                self.updateStatus("No camera is available")
+                return
+            }
+            let output = AVCaptureMetadataOutput()
+            guard self.session.canAddOutput(output) else {
+                self.updateStatus("QR scanning is unavailable")
+                return
+            }
+            self.isConfigured = true
+            self.session.beginConfiguration()
+            self.session.addInput(input)
+            self.session.addOutput(output)
+            output.setMetadataObjectsDelegate(self, queue: .main)
+            output.metadataObjectTypes = [.qr]
+            self.session.commitConfiguration()
 
-        let layer = AVCaptureVideoPreviewLayer(session: session)
-        layer.videoGravity = .resizeAspectFill
-        previewView.layer.addSublayer(layer)
-        previewLayer = layer
-        session.startRunning()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let layer = AVCaptureVideoPreviewLayer(session: self.session)
+                layer.videoGravity = .resizeAspectFill
+                self.previewView.layer.addSublayer(layer)
+                self.previewLayer = layer
+                self.view.setNeedsLayout()
+                self.view.layoutIfNeeded()
+                self.sessionQueue.async { [weak self] in
+                    self?.session.startRunning()
+                }
+            }
+        }
+    }
+
+    private func updateStatus(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.showCameraMessage(message)
+        }
     }
 
     func metadataOutput(
@@ -197,6 +216,20 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
 }
 
 final class QRFrameView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+    }
+
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let cornerLength = min(rect.width, rect.height) * 0.18
