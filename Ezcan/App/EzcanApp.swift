@@ -26,16 +26,18 @@ struct EzcanApp: App {
                         dismissButton: .default(Text("OK"))
                     )
                 }
-                .alert("File received", item: $sharedFileMonitor.newlyReceivedFile) { file in
-                    Button("View Files") {
-                        sharedFileMonitor.dismissNewFile()
-                        sharedFilesPresented = true
-                    }
-                    Button("OK", role: .cancel) {
-                        sharedFileMonitor.dismissNewFile()
-                    }
-                } message: { file in
-                    Text("\(file.fileName) is ready on the computer. Open Files to download it.")
+                .alert(item: $sharedFileMonitor.newlyReceivedFile) { file in
+                    Alert(
+                        title: Text("File received"),
+                        message: Text("\(file.fileName) is ready on the computer. Open Files to download it."),
+                        primaryButton: .default(Text("View Files")) {
+                            sharedFileMonitor.dismissNewFile()
+                            sharedFilesPresented = true
+                        },
+                        secondaryButton: .cancel {
+                            sharedFileMonitor.dismissNewFile()
+                        }
+                    )
                 }
                 .sheet(isPresented: $sharedFilesPresented) {
                     SharedFilesView()
