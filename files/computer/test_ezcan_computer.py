@@ -664,10 +664,25 @@ def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path)
     assert draft["status"] == "draft"
     assert draft["title"] == "Japanese | Charizard | Base Set | 4/102"
     assert draft["shipping"] == {"firstItemCharge": "34.00", "additionalItemsCharge": "0.00"}
+    assert draft["researchStatus"] == "current"
     assert draft["publishing"] == {"published": False, "sellerCredentialsUsed": False}
     assert str(Path(card["folder_path"]) / "original" / "front.jpg") in draft["imagePaths"]
     assert listing["status"] == "draft"
     assert Path(listing["draft_path"]) == draft_path
+
+    app.state.store.add_ebay_candidate(
+        search_id,
+        {
+            "market_status": "active",
+            "title": "New active Charizard listing",
+            "item_url": "https://www.ebay.com/itm/999",
+            "price": "115",
+            "shipping_price": "34",
+        },
+    )
+    outdated = json.loads(draft_path.read_text(encoding="utf-8"))
+    assert outdated["researchStatus"] == "outdated"
+    assert "New market evidence" in outdated["researchNote"]
 
     app.state.store.update_listing_draft(archive_code, "Reviewed Charizard", "A reviewed local description.")
     reviewed = json.loads(draft_path.read_text(encoding="utf-8"))

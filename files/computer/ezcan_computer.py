@@ -779,7 +779,24 @@ class Store:
                 "UPDATE cards SET status = 'identified', updated_at = ? WHERE archive_code = ? AND status = 'researched'",
                 (utc_now(), search["archive_code"]),
             )
-            return int(cursor.lastrowid)
+            candidate_id = int(cursor.lastrowid)
+        self._mark_latest_draft_research_outdated(str(search["archive_code"]))
+        return candidate_id
+
+    def _mark_latest_draft_research_outdated(self, archive_code: str) -> None:
+        listing = self.latest_listing_draft(archive_code)
+        if listing is None:
+            return
+        draft_path = Path(listing["draft_path"])
+        try:
+            draft = json.loads(draft_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if not isinstance(draft, dict) or draft.get("researchStatus") == "outdated":
+            return
+        draft["researchStatus"] = "outdated"
+        draft["researchNote"] = "New market evidence was recorded. Regenerate this draft before relying on its pricing."
+        draft_path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
 
     def ebay_candidates(self, archive_code: str) -> list[sqlite3.Row]:
         with self.connection() as connection:
@@ -2134,6 +2151,19 @@ class DesktopWindow:
             padx=14,
             pady=11,
         ).pack(fill="x", pady=(0, 16))
+        if draft.get("researchStatus") == "outdated":
+            tk.Label(
+                body,
+                text="PRICING NEEDS REFRESH  |  New market evidence was recorded after this draft was generated.",
+                bg="#fff3d6",
+                fg="#7a4d00",
+                font=("Consolas", 9, "bold"),
+                justify="left",
+                anchor="w",
+                wraplength=700,
+                padx=14,
+                pady=9,
+            ).pack(fill="x", pady=(0, 16))
         tk.Label(body, text="TITLE", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w")
         title_var = tk.StringVar(value=str(draft.get("title", "")))
         tk.Entry(body, textvariable=title_var, width=80).pack(fill="x", pady=(4, 14))

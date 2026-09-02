@@ -75,6 +75,7 @@ def build_listing_draft(
             "estimatedProfitBeforeCostsLow": str(recommendation.estimated_profit_before_costs_low),
             "estimatedProfitBeforeCostsHigh": str(recommendation.estimated_profit_before_costs_high),
         },
+        "researchStatus": "current",
         "archiveCode": _text(card.get("archive_code")),
         "internalId": _text(card.get("internal_id")),
         "imagePaths": image_paths,
