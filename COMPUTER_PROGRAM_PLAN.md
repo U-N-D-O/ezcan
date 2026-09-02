@@ -101,19 +101,19 @@ letter-digit-letter-digit
 Examples:
 
 ```text
-K4M7
-R8C3
-T2W9
+A0A0
+A0A1
+A0A9
+A0B0
 ```
 
 Rules:
 
-- Generate codes randomly.
-- Use an alphabet that excludes confusing letters and digits, such as `I`, `O`, `S`, `Z`, `0`, `1`, and `5`.
-- Require the two letters to be different.
+- Generate codes sequentially from `A0A0`, while accepting valid manual overrides.
+- Use uppercase letters and digits in the `letter-digit-letter-digit` format.
 - Check every candidate against the database.
 - Never reuse retired codes.
-- Do not calculate a code by counting folders or incrementing the previous code.
+- Advance the latest code like an odometer, changing the final digit first.
 - Store the code in the database, folder name, manifest, physical label, and listing record.
 - Also store a UUID as the internal permanent identifier.
 

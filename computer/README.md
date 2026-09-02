@@ -11,7 +11,7 @@ Windows companion program for the Ezcan iOS capture app.
 - Streamed photo and video uploads.
 - SHA-256 upload verification.
 - Safe retry for the same file.
-- Random archive codes in the `letter-digit-letter-digit` format, such as `K4M7`.
+- Sequential archive codes in the `letter-digit-letter-digit` format, starting at `A0A0`.
 - Permanent card folders named with the archive code.
 - SQLite records and `manifest.json` files.
 - Local dashboard at `http://localhost:8765`.

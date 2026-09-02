@@ -4,11 +4,56 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from ezcan_computer import create_app, default_data_root, program_directory
+from ezcan_computer import create_app, default_data_root, increment_archive_code, program_directory
 
 
 def test_default_archive_is_next_to_program() -> None:
     assert default_data_root() == program_directory() / "Archive"
+
+
+def test_archive_codes_increment_in_storage_order() -> None:
+    assert increment_archive_code("A0A0") == "A0A1"
+    assert increment_archive_code("A0A9") == "A0B0"
+    assert increment_archive_code("A0Z9") == "A1A0"
+    assert increment_archive_code("A9Z9") == "B0A0"
+
+
+def test_new_intakes_reserve_sequential_archive_codes(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "data")
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.token}"}
+
+    codes = [
+        client.post("/api/intakes", headers=headers, json={}).json()["suggestedArchiveCode"]
+        for _ in range(11)
+    ]
+
+    assert codes[:10] == [f"A0A{index}" for index in range(10)]
+    assert codes[10] == "A0B0"
+
+
+def test_manual_archive_code_becomes_next_sequence_value(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "data")
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.token}"}
+    intake_id = client.post("/api/intakes", headers=headers, json={}).json()["intakeId"]
+    content = b"manual-code-card"
+    media_headers = {
+        **headers,
+        "X-Ezcan-File-Name": "front.jpg",
+        "X-Ezcan-Media-Type": "image",
+        "X-Ezcan-SHA256": hashlib.sha256(content).hexdigest(),
+    }
+    assert client.post(f"/api/intakes/{intake_id}/media", headers=media_headers, content=content).status_code == 200
+    response = client.post(
+        f"/api/intakes/{intake_id}/complete",
+        headers=headers,
+        json={"archiveCode": "C4D9"},
+    )
+    assert response.status_code == 200
+
+    next_intake = client.post("/api/intakes", headers=headers, json={}).json()
+    assert next_intake["suggestedArchiveCode"] == "C4E0"
 
 
 def test_intake_upload_and_archive(tmp_path: Path) -> None:

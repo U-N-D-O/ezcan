@@ -187,16 +187,16 @@ letter-digit-letter-digit
 Examples:
 
 ```text
-K4M7
-R8C3
-T2W9
+A0A0
+A0A1
+A0A9
+A0B0
 ```
 
 Rules:
 
-- The code is randomly generated, not sequential.
-- The two letters are different.
-- Confusing characters are excluded, such as `I`, `O`, `S`, `Z`, `0`, `1`, and `5`.
+- The code advances sequentially from `A0A0`; a manually entered valid code becomes the latest entry for the next automatic code.
+- The format uses uppercase letters and digits in the positions `letter-digit-letter-digit`.
 - The computer checks the code against its database before assigning it.
 - Retired codes are never reused.
 - The code is displayed in large, clear text after upload finalization.

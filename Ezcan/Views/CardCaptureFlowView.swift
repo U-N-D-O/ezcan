@@ -166,7 +166,7 @@ struct CardCaptureFlowView: View {
                     EzcanStatusPill(title: "STEP \(stageIndex(stage))/4", color: EzcanTheme.cyan)
                 }
                 VStack(spacing: 14) {
-                    EzcanInstrumentRing(progress: stageProgress(stage), accent: stage == .video ? EzcanTheme.pink : EzcanTheme.cyan) {
+                    EzcanInstrumentRing(progress: captureProgress, accent: stage == .video ? EzcanTheme.pink : EzcanTheme.cyan) {
                         VStack(spacing: 8) {
                             Image(systemName: stage == .video ? "video.fill" : "camera.viewfinder")
                                 .font(.system(size: 29, weight: .medium))
@@ -547,10 +547,6 @@ struct CardCaptureFlowView: View {
         case .additional: return 3
         case .video: return 4
         }
-    }
-
-    private func stageProgress(_ stage: CaptureStage) -> Double {
-        Double(stageIndex(stage)) / 4.0
     }
 
     private func createIntake() async {

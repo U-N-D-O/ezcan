@@ -25,8 +25,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 
-ARCHIVE_LETTERS = "ABCDEFGHJKLMNPQRTUVWXY"
-ARCHIVE_DIGITS = "2346789"
+SEQUENTIAL_ARCHIVE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+SEQUENTIAL_ARCHIVE_DIGITS = "0123456789"
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
 MAX_VIDEO_BYTES = 300 * 1024 * 1024
 MAX_SHARED_FILE_BYTES = 1024 * 1024 * 1024
@@ -92,6 +92,26 @@ def valid_archive_code(value: str) -> bool:
     )
 
 
+def increment_archive_code(value: str) -> str:
+    if not valid_archive_code(value):
+        raise ValueError("Archive code must match uppercase letter-digit-letter-digit format")
+    characters = list(value)
+    alphabets = (
+        SEQUENTIAL_ARCHIVE_LETTERS,
+        SEQUENTIAL_ARCHIVE_DIGITS,
+        SEQUENTIAL_ARCHIVE_LETTERS,
+        SEQUENTIAL_ARCHIVE_DIGITS,
+    )
+    for index in (3, 2, 1, 0):
+        alphabet = alphabets[index]
+        position = alphabet.index(characters[index])
+        if position < len(alphabet) - 1:
+            characters[index] = alphabet[position + 1]
+            return "".join(characters)
+        characters[index] = alphabet[0]
+    raise ValueError("Archive code sequence is exhausted")
+
+
 class Store:
     def __init__(self, root: Path):
         self.root = root
@@ -153,19 +173,24 @@ class Store:
                     authenticity_status TEXT,
                     notes TEXT
                 );
+                CREATE TABLE IF NOT EXISTS archive_sequence (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    latest_code TEXT NOT NULL
+                );
                 """
             )
 
-    def create_intake(self, note: str | None) -> tuple[str, Path]:
+    def create_intake(self, note: str | None) -> tuple[str, Path, str]:
         intake_id = str(uuid.uuid4())
         temporary_path = self.incoming / f"uploading-{intake_id}"
         (temporary_path / "original").mkdir(parents=True)
+        archive_code = self.new_archive_code()
         with self.connection() as connection:
             connection.execute(
-                "INSERT INTO intakes VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL)",
-                (intake_id, str(temporary_path), note, "uploading", utc_now()),
+                "INSERT INTO intakes VALUES (?, ?, ?, ?, ?, NULL, ?, NULL)",
+                (intake_id, str(temporary_path), note, "uploading", archive_code, utc_now()),
             )
-        return intake_id, temporary_path
+        return intake_id, temporary_path, archive_code
 
     def intake(self, intake_id: str) -> sqlite3.Row | None:
         with self.connection() as connection:
@@ -196,22 +221,25 @@ class Store:
         intake = self.intake(intake_id)
         if intake is None:
             raise HTTPException(status_code=404, detail="Intake not found")
-        if intake["archive_code"]:
+        if intake["status"] == "finalized":
             return str(intake["archive_code"])
         media = self.media(intake_id)
         if not media:
             raise HTTPException(status_code=400, detail="At least one media file is required")
 
-        archive_code = self.new_archive_code() if requested_archive_code is None else requested_archive_code
-        if requested_archive_code is not None and (not isinstance(archive_code, str) or not valid_archive_code(archive_code)):
+        if requested_archive_code:
+            archive_code = requested_archive_code
+        else:
+            archive_code = intake["archive_code"] or self.new_archive_code()
+        if requested_archive_code and (not isinstance(archive_code, str) or not valid_archive_code(archive_code)):
             raise HTTPException(
                 status_code=422,
                 detail="Archive code must match uppercase letter-digit-letter-digit format",
             )
         with self.connection() as connection:
             if connection.execute(
-                "SELECT 1 FROM cards WHERE archive_code = ? OR archive_code IN (SELECT archive_code FROM intakes WHERE archive_code = ?)",
-                (archive_code, archive_code),
+                "SELECT 1 FROM cards WHERE archive_code = ? UNION ALL SELECT 1 FROM intakes WHERE archive_code = ? AND intake_id != ?",
+                (archive_code, archive_code, intake_id),
             ).fetchone():
                 raise HTTPException(status_code=409, detail="Archive code is already in use")
         internal_id = str(uuid.uuid4())
@@ -245,6 +273,10 @@ class Store:
                 (archive_code, internal_id, now, intake_id),
             )
             connection.execute(
+                "INSERT INTO archive_sequence (id, latest_code) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET latest_code = excluded.latest_code",
+                (archive_code,),
+            )
+            connection.execute(
                 "INSERT INTO cards (internal_id, archive_code, folder_path, status, created_at, updated_at, notes) VALUES (?, ?, ?, 'received', ?, ?, ?)",
                 (internal_id, archive_code, str(final_path), now, now, intake["note"]),
             )
@@ -262,21 +294,21 @@ class Store:
 
     def new_archive_code(self) -> str:
         with self.connection() as connection:
-            for _ in range(100):
-                code = "".join(
-                    (
-                        secrets.choice(ARCHIVE_LETTERS),
-                        secrets.choice(ARCHIVE_DIGITS),
-                        secrets.choice(ARCHIVE_LETTERS),
-                        secrets.choice(ARCHIVE_DIGITS),
-                    )
-                )
+            row = connection.execute("SELECT latest_code FROM archive_sequence WHERE id = 1").fetchone()
+        candidate = "A0A0" if row is None else increment_archive_code(str(row["latest_code"]))
+        with self.connection() as connection:
+            for _ in range(26 * 10 * 26 * 10):
                 exists = connection.execute(
                     "SELECT 1 FROM cards WHERE archive_code = ? OR archive_code IN (SELECT archive_code FROM intakes WHERE archive_code = ?)",
-                    (code, code),
+                    (candidate, candidate),
                 ).fetchone()
                 if exists is None:
-                    return code
+                    connection.execute(
+                        "INSERT INTO archive_sequence (id, latest_code) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET latest_code = excluded.latest_code",
+                        (candidate,),
+                    )
+                    return candidate
+                candidate = increment_archive_code(candidate)
         raise RuntimeError("Could not generate a unique archive code")
 
     def recent_cards(self) -> list[sqlite3.Row]:
@@ -410,8 +442,8 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             body = await request.json()
         except json.JSONDecodeError:
             body = {}
-        intake_id, _ = store.create_intake(body.get("note"))
-        return JSONResponse({"intakeId": intake_id, "suggestedArchiveCode": store.new_archive_code()})
+        intake_id, _, archive_code = store.create_intake(body.get("note"))
+        return JSONResponse({"intakeId": intake_id, "suggestedArchiveCode": archive_code})
 
     @app.post("/api/intakes/{intake_id}/media")
     async def upload_media(intake_id: str, request: Request) -> JSONResponse:
