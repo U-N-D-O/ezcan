@@ -30,6 +30,11 @@ private enum CapturePhase: Equatable {
     case failed(String)
 }
 
+private struct PendingUpload {
+    let media: CapturedMedia
+    let stage: CaptureStage
+}
+
 struct CardCaptureFlowView: View {
     @EnvironmentObject private var pairingStore: PairingStore
     @State private var intakeID: String?
@@ -44,6 +49,7 @@ struct CardCaptureFlowView: View {
     @State private var hasStarted = false
     @State private var cardGeneration = 0
     @State private var isCameraDismissing = false
+    @State private var pendingUpload: PendingUpload?
 
     var body: some View {
         ZStack {
@@ -63,19 +69,23 @@ struct CardCaptureFlowView: View {
                 cameraStage = stage
             }
         }
-        .fullScreenCover(item: $cameraStage) { stage in
+        .fullScreenCover(item: $cameraStage, onDismiss: {
+            guard let pendingUpload else { return }
+            self.pendingUpload = nil
+            upload(pendingUpload.media, for: pendingUpload.stage)
+        }) { stage in
             GuidedCameraView(
                 title: stage.title,
                 mode: stage.cameraMode,
                 onPhoto: { media in
+                    pendingUpload = PendingUpload(media: media, stage: stage)
                     cameraStage = nil
                     isCameraDismissing = true
-                    upload(media, for: stage)
                 },
                 onVideo: { media in
+                    pendingUpload = PendingUpload(media: media, stage: stage)
                     cameraStage = nil
                     isCameraDismissing = true
-                    upload(media, for: stage)
                 },
                 onBack: {
                     cameraStage = nil

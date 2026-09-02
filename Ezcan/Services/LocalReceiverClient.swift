@@ -55,7 +55,10 @@ struct LocalReceiverClient {
     }
 
     func upload(_ media: CapturedMedia, to intakeId: String) async throws {
-        let hash = try sha256(of: media.fileURL)
+        let fileURL = media.fileURL
+        let hash = try await Task.detached(priority: .userInitiated) {
+            try Self.sha256(of: fileURL)
+        }.value
         var request = try makeRequest(
             path: "api/intakes/\(intakeId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? intakeId)/media",
             method: "POST",
@@ -131,7 +134,7 @@ struct LocalReceiverClient {
         }
     }
 
-    private func sha256(of url: URL) throws -> String {
+    private static func sha256(of url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var digest = SHA256()
