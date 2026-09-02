@@ -660,25 +660,11 @@ struct CardCaptureFlowView: View {
     }
 
     private func cacheFrontPhoto(_ media: CapturedMedia, intakeID: String) -> URL? {
-        guard let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        let directory = cachesDirectory.appendingPathComponent("Ezcan", isDirectory: true)
-        let destination = directory.appendingPathComponent("front-\(intakeID).jpg")
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try? FileManager.default.removeItem(at: destination)
-            try FileManager.default.copyItem(at: media.fileURL, to: destination)
-            return destination
-        } catch {
-            return nil
-        }
+        FrontPhotoCache.cache(media: media, intakeID: intakeID)
     }
 
     private func deleteCachedFrontPhoto() {
-        if let frontPhotoURL {
-            try? FileManager.default.removeItem(at: frontPhotoURL)
-        }
+        FrontPhotoCache.remove(frontPhotoURL)
         frontPhotoURL = nil
     }
 

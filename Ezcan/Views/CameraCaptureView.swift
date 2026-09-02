@@ -336,9 +336,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                     return
                 }
                 self.session.addOutput(self.photoOutput)
-                if self.photoOutput.isHighResolutionCaptureSupported {
-                    self.photoOutput.isHighResolutionCaptureEnabled = true
-                }
+                self.photoOutput.isHighResolutionCaptureEnabled = true
             } else {
                 guard self.session.canAddOutput(self.movieOutput) else {
                     self.session.commitConfiguration()
@@ -418,7 +416,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     private func applyZoom(to camera: AVCaptureDevice, factor: CGFloat) {
-        guard camera.isVideoZoomSupported else { return }
+        guard camera.maxAvailableVideoZoomFactor > camera.minAvailableVideoZoomFactor else { return }
         let clampedFactor = min(max(factor, camera.minAvailableVideoZoomFactor), camera.maxAvailableVideoZoomFactor)
         do {
             try camera.lockForConfiguration()
@@ -460,6 +458,9 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         switch selectedMode {
         case .automatic:
             updateStatus("Auto lens · watching focus")
+            switchCameraIfNeeded(to: false)
+        case .standard:
+            updateStatus("Standard camera · 1X")
             switchCameraIfNeeded(to: false)
         case .closeUp:
             updateStatus("Macro camera · close focus")

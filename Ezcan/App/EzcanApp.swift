@@ -11,6 +11,7 @@ struct EzcanApp: App {
     @State private var sharedFileError: String?
 
     init() {
+        FrontPhotoCache.removeStalePhotos()
         CrashReporter.install()
         _previousCrash = State(initialValue: CrashReporter.shared.previousCrash())
         CrashReporter.shared.startSession()
