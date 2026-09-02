@@ -8,7 +8,7 @@ from PIL import Image
 
 from ebay import open_picture_search
 from ebay_account import EbayAccountManager
-from ezcan_computer import Store, create_app, default_data_root, increment_archive_code, program_directory
+from ezcan_computer import Store, card_action_availability, create_app, default_data_root, increment_archive_code, program_directory
 from image_processor import prepare_search_image
 from pricing import recommend_price
 
@@ -32,6 +32,23 @@ def test_ebay_account_profile_stores_state_without_credentials(tmp_path: Path) -
     manager.remove_profile()
     assert manager.state()["status"] == "not_connected"
     assert not manager.profile_path.exists()
+
+
+def test_card_action_availability_follows_workflow_state() -> None:
+    assert card_action_availability(None, False) == {
+        "search": False,
+        "match": False,
+        "identity": False,
+        "make_draft": False,
+        "review_draft": False,
+    }
+    assert card_action_availability("received", False)["search"] is True
+    assert card_action_availability("received", False)["match"] is False
+    assert card_action_availability("searching", False)["match"] is True
+    assert card_action_availability("identified", False)["make_draft"] is True
+    assert card_action_availability("identified", True)["review_draft"] is True
+    assert card_action_availability("identified", True)["make_draft"] is False
+    assert card_action_availability("recovery_required", False)["search"] is False
 
 
 def test_default_archive_is_next_to_program() -> None:

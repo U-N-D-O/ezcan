@@ -128,6 +128,18 @@ def validate_card_details(details: dict[str, str]) -> dict[str, str]:
     }
 
 
+def card_action_availability(status: str | None, has_draft: bool) -> dict[str, bool]:
+    if status is None or status == "recovery_required":
+        return {key: False for key in ("search", "match", "identity", "make_draft", "review_draft")}
+    return {
+        "search": status in {"received", "searching", "identified"},
+        "match": status in {"searching", "identified"},
+        "identity": status in {"searching", "identified"},
+        "make_draft": status == "identified" and not has_draft,
+        "review_draft": status == "identified" and has_draft,
+    }
+
+
 def increment_archive_code(value: str) -> str:
     if not valid_archive_code(value):
         raise ValueError("Archive code must match uppercase letter-digit-letter-digit format")
@@ -1127,6 +1139,7 @@ class DesktopWindow:
         self.selected_details_var = tk.StringVar(value="")
         self.selected_state_var = tk.StringVar(value="")
         self.selected_photo: tk.PhotoImage | None = None
+        self.card_action_buttons: dict[str, tk.Canvas] = {}
         self.qr_photo: tk.PhotoImage | None = None
         self.tree: ttk.Treeview
         self.build_styles()
@@ -1247,24 +1260,36 @@ class DesktopWindow:
         def paint() -> None:
             button.delete("all")
             offset = 3 if state["pressed"] else 0
+            fill = color if state["enabled"] else "#b8c4d0"
+            label_color = foreground if state["enabled"] else "#6d7d8c"
             rounded_shape(2, 6 + offset, width - 2, height - 1 + offset, "#b8c4d0")
-            rounded_shape(0, 2 + offset, width - 4, height - 5 + offset, "#654358", "#654358")
-            rounded_shape(3, 5 + offset, width - 7, height - 8 + offset, "#170928")
-            rounded_shape(5, 7 + offset, width - 9, height - 10 + offset, "#1d0d33")
-            rounded_shape(5, 7 + offset, width - 9, height // 2 + offset, "#654358")
-            rounded_shape(5, height // 2 - 1 + offset, width - 9, height - 10 + offset, "#170928")
-            button.create_text(width // 2 - 7, height // 2 - 2 + offset, text=text, fill=foreground, font=("Segoe UI", 10, "bold"), tags="label")
-            button.create_text(width - 22, height // 2 - 2 + offset, text="→", fill=foreground, font=("Segoe UI", 16, "bold"), tags="icon")
+            rounded_shape(0, 2 + offset, width - 4, height - 5 + offset, fill, fill)
+            rounded_shape(3, 5 + offset, width - 7, height - 8 + offset, fill)
+            rounded_shape(5, 7 + offset, width - 9, height - 10 + offset, fill)
+            button.create_text(width // 2 - 7, height // 2 - 2 + offset, text=text, fill=label_color, font=("Segoe UI", 10, "bold"), tags="label")
+            button.create_text(width - 22, height // 2 - 2 + offset, text="→", fill=label_color, font=("Segoe UI", 16, "bold"), tags="icon")
+
+        def set_enabled(enabled: bool) -> None:
+            state["enabled"] = enabled
+            state["pressed"] = False
+            button.configure(cursor="hand2" if enabled else "arrow")
+            paint()
 
         def press(_event: tk.Event) -> None:
+            if not state["enabled"]:
+                return
             state["pressed"] = True
             paint()
 
         def release(_event: tk.Event) -> None:
+            if not state["enabled"]:
+                return
             state["pressed"] = False
             paint()
             command()
 
+        state["enabled"] = True
+        button.set_enabled = set_enabled
         paint()
         button.bind("<ButtonPress-1>", press)
         button.bind("<ButtonRelease-1>", release)
@@ -1435,12 +1460,29 @@ class DesktopWindow:
         tk.Label(frame, textvariable=self.selected_details_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 10), justify="left", anchor="w", wraplength=360).pack(fill="x", padx=20)
         actions = tk.Frame(frame, bg=self.panel)
         actions.pack(fill="x", padx=20, pady=(22, 20))
-        self.rounded_button(actions, "SEARCH EBAY", self.search_selected_card, 142, self.green).pack(fill="x", pady=(0, 8))
-        self.rounded_button(actions, "ADD MATCH", self.record_selected_candidate, 142, self.amber, foreground=self.text).pack(fill="x", pady=(0, 8))
-        self.rounded_button(actions, "REVIEW IDENTITY", self.review_selected_matches, 142, self.cyan, foreground=self.text).pack(fill="x", pady=(0, 8))
-        self.rounded_button(actions, "MAKE DRAFT", self.create_draft_for_selected_card, 142, self.blue).pack(fill="x", pady=(0, 8))
-        self.rounded_button(actions, "REVIEW DRAFT", self.review_draft_for_selected_card, 142, self.magenta).pack(fill="x")
+        action_specs = (
+            ("search", "SEARCH EBAY", self.search_selected_card, self.green, "white"),
+            ("match", "ADD MATCH", self.record_selected_candidate, self.amber, self.text),
+            ("identity", "REVIEW IDENTITY", self.review_selected_matches, self.cyan, self.text),
+            ("make_draft", "MAKE DRAFT", self.create_draft_for_selected_card, self.blue, "white"),
+            ("review_draft", "REVIEW DRAFT", self.review_draft_for_selected_card, self.magenta, "white"),
+        )
+        for index, (key, label, command, color, foreground) in enumerate(action_specs):
+            button = self.rounded_button(actions, label, command, 142, color, foreground=foreground)
+            button.pack(fill="x", pady=(0, 8 if index < len(action_specs) - 1 else 0))
+            self.card_action_buttons[key] = button
+        self.update_card_actions(None)
         return frame
+
+    def update_card_actions(self, card: sqlite3.Row | None) -> None:
+        has_draft = (
+            card is not None
+            and card["status"] != "recovery_required"
+            and self.store.latest_listing_draft(str(card["archive_code"])) is not None
+        )
+        enabled = card_action_availability(str(card["status"]) if card is not None else None, has_draft)
+        for key, button in self.card_action_buttons.items():
+            button.set_enabled(enabled[key])
 
     def build_pairing_panel(self, parent: tk.Misc) -> tk.Frame:
         frame = tk.Frame(parent, bg=self.cyan, highlightthickness=1, highlightbackground=self.cyan)
@@ -1644,7 +1686,9 @@ class DesktopWindow:
                 )
                 self.selected_photo = None
                 self.selected_preview.configure(image="", text="Archive recovery needed")
+            self.update_card_actions(None)
             return
+        self.update_card_actions(card)
         self.selected_card_var.set(f"{card['archive_code']}  {card['card_name'] or 'Identity not confirmed'}")
         self.selected_state_var.set(str(card["status"]).replace("_", " ").upper())
         self.selected_details_var.set(
