@@ -15,6 +15,7 @@ targets:
       - path: Ezcan
     resources:
       - path: ezcan_logo.png
+      - path: Ezcan/Resources/LaunchScreen.storyboard
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.undu.ezcan
@@ -28,6 +29,8 @@ targets:
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Ezcan connects to your computer over your private Wi-Fi network."
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
+        INFOPLIST_KEY_UIRequiresFullScreen: YES
     scheme:
       gatherCoverageData: false
       testTargets: []

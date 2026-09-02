@@ -31,7 +31,13 @@ struct GuidedCameraView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: GuidedCameraController, context: Context) {}
 }
 
-final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDelegate, AVCaptureFileOutputRecordingDelegate {
+final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDelegate, AVCaptureFileOutputRecordingDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
+    private enum LensMode {
+        case automatic
+        case standard
+        case closeUp
+    }
+
     private let titleText: String
     private let mode: GuidedCameraView.Mode
     private let onPhoto: (CapturedMedia) -> Void
@@ -44,17 +50,27 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private let sessionQueue = DispatchQueue(label: "com.undu.ezcan.camera-session")
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
+    private let videoDataOutput = AVCaptureVideoDataOutput()
+    private let analysisQueue = DispatchQueue(label: "com.undu.ezcan.camera-analysis")
     private let previewView = UIView()
     private let guideView = CardGuideView()
     private let timerLabel = UILabel()
     private let statusLabel = UILabel()
+    private let lensControl = UISegmentedControl(items: ["AUTO", "1X", "MACRO"])
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var cameraDevice: AVCaptureDevice?
+    private var cameraInput: AVCaptureDeviceInput?
+    private var standardCamera: AVCaptureDevice?
+    private var closeUpCamera: AVCaptureDevice?
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
     private var isRecording = false
     private var isConfigured = false
     private var hasFinished = false
+    private var lensMode = LensMode.automatic
+    private var closeUpFrames = 0
+    private var standardFrames = 0
+    private var nextAutomaticSwitchDate = Date.distantPast
 
     init(
         title: String,
@@ -165,6 +181,14 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         statusLabel.clipsToBounds = true
         view.addSubview(statusLabel)
 
+        lensControl.translatesAutoresizingMaskIntoConstraints = false
+        lensControl.selectedSegmentIndex = 0
+        lensControl.selectedSegmentTintColor = UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 1)
+        lensControl.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
+        lensControl.setTitleTextAttributes([.foregroundColor: UIColor(red: 0.01, green: 0.08, blue: 0.11, alpha: 1)], for: .selected)
+        lensControl.addTarget(self, action: #selector(lensModeChanged), for: .valueChanged)
+        view.addSubview(lensControl)
+
         let backButton = makeButton(title: "Back", imageName: "chevron.left")
         backButton.addAction(UIAction { [weak self] _ in self?.handleBack() }, for: .touchUpInside)
         view.addSubview(backButton)
@@ -213,6 +237,10 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             statusLabel.topAnchor.constraint(equalTo: guideView.bottomAnchor, constant: 14),
             statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            lensControl.topAnchor.constraint(equalTo: timerLabel.bottomAnchor, constant: 10),
+            lensControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            lensControl.widthAnchor.constraint(equalToConstant: 206),
+            lensControl.heightAnchor.constraint(equalToConstant: 32),
             backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
             backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
             cancelButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
@@ -289,7 +317,17 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             }
             self.session.addInput(videoInput)
             self.cameraDevice = camera
+            self.cameraInput = videoInput
+            self.standardCamera = camera
+            self.closeUpCamera = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
             self.configureContinuousFocus(on: camera)
+
+            self.videoDataOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
+            self.videoDataOutput.alwaysDiscardsLateVideoFrames = true
+            self.videoDataOutput.setSampleBufferDelegate(self, queue: self.analysisQueue)
+            if self.session.canAddOutput(self.videoDataOutput) {
+                self.session.addOutput(self.videoDataOutput)
+            }
 
             if self.mode == .photo {
                 guard self.session.canAddOutput(self.photoOutput) else {
@@ -324,7 +362,8 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                 self.view.setNeedsLayout()
                 self.view.layoutIfNeeded()
                 self.setPortraitOrientation()
-                self.statusLabel.text = "Ready"
+                self.lensControl.isEnabled = self.closeUpCamera != nil
+                self.statusLabel.text = self.closeUpCamera == nil ? "Ready · Macro unavailable" : "Ready · Auto lens"
             }
             self.session.startRunning()
         }
@@ -341,6 +380,9 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         do {
             try camera.lockForConfiguration()
             camera.focusMode = .continuousAutoFocus
+            if camera.isAutoFocusRangeRestrictionSupported {
+                camera.autoFocusRangeRestriction = lensMode == .closeUp ? .near : .none
+            }
             if camera.isFocusPointOfInterestSupported {
                 camera.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
                 camera.isSubjectAreaChangeMonitoringEnabled = true
@@ -355,6 +397,135 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         } catch {
             updateStatus("Camera focus is unavailable")
         }
+    }
+
+    @objc private func lensModeChanged() {
+        let selectedMode: LensMode
+        switch lensControl.selectedSegmentIndex {
+        case 1:
+            selectedMode = .standard
+        case 2:
+            selectedMode = .closeUp
+        default:
+            selectedMode = .automatic
+        }
+
+        guard selectedMode != .closeUp || closeUpCamera != nil else {
+            lensControl.selectedSegmentIndex = 0
+            updateStatus("Macro camera is unavailable on this iPhone")
+            return
+        }
+        lensMode = selectedMode
+        closeUpFrames = 0
+        standardFrames = 0
+        nextAutomaticSwitchDate = Date().addingTimeInterval(0.8)
+
+        switch selectedMode {
+        case .automatic:
+            updateStatus("Auto lens · watching focus")
+            switchCameraIfNeeded(to: false)
+        case .standard:
+            updateStatus("Standard camera · 1X")
+            switchCameraIfNeeded(to: false)
+        case .closeUp:
+            updateStatus("Macro camera · close focus")
+            switchCameraIfNeeded(to: true)
+        }
+    }
+
+    private func switchCameraIfNeeded(to closeUp: Bool) {
+        sessionQueue.async { [weak self] in
+            guard let self,
+                  !self.hasFinished,
+                  !self.isRecording,
+                  let targetCamera = closeUp ? self.closeUpCamera : self.standardCamera,
+                  targetCamera.uniqueID != self.cameraDevice?.uniqueID,
+                  let targetInput = try? AVCaptureDeviceInput(device: targetCamera),
+                  self.session.canAddInput(targetInput) else { return }
+
+            self.session.beginConfiguration()
+            if let currentInput = self.cameraInput {
+                self.session.removeInput(currentInput)
+            }
+            self.session.addInput(targetInput)
+            self.cameraInput = targetInput
+            self.cameraDevice = targetCamera
+            self.configureContinuousFocus(on: targetCamera)
+            self.session.commitConfiguration()
+            self.nextAutomaticSwitchDate = Date().addingTimeInterval(1.2)
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let message = closeUp ? "Macro camera · close focus" : "Standard camera · 1X"
+                if self.lensMode == .automatic {
+                    self.statusLabel.text = closeUp ? "Auto lens · macro" : "Auto lens · standard"
+                } else {
+                    self.statusLabel.text = message
+                }
+            }
+        }
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard lensMode == .automatic,
+              !isRecording,
+              closeUpCamera != nil,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
+              let camera = cameraDevice else { return }
+
+        let sharpness = Self.centerSharpness(of: pixelBuffer)
+        let lensPosition = camera.lensPosition
+        let looksTooClose = lensPosition > 0.82 || (lensPosition > 0.64 && sharpness < 22)
+        let looksComfortableOnStandard = lensPosition < 0.58 && sharpness > 28
+
+        if camera.uniqueID == standardCamera?.uniqueID {
+            closeUpFrames = looksTooClose ? closeUpFrames + 1 : 0
+            standardFrames = 0
+            if closeUpFrames >= 7, Date() >= nextAutomaticSwitchDate {
+                closeUpFrames = 0
+                switchCameraIfNeeded(to: true)
+            }
+        } else {
+            standardFrames = looksComfortableOnStandard ? standardFrames + 1 : 0
+            closeUpFrames = 0
+            if standardFrames >= 12, Date() >= nextAutomaticSwitchDate {
+                standardFrames = 0
+                switchCameraIfNeeded(to: false)
+            }
+        }
+    }
+
+    private static func centerSharpness(of pixelBuffer: CVPixelBuffer) -> Double {
+        guard CVPixelBufferGetPlaneCount(pixelBuffer) > 0 else { return 0 }
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let baseAddress = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) else { return 0 }
+
+        let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
+        let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
+        let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
+        let pixels = baseAddress.assumingMemoryBound(to: UInt8.self)
+        let left = width / 5
+        let right = width * 4 / 5
+        let top = height / 5
+        let bottom = height * 4 / 5
+        let sampleStride = 4
+        var sum = 0.0
+        var sumSquared = 0.0
+        var count = 0.0
+
+        for y in Swift.stride(from: top + 1, through: bottom - 2, by: sampleStride) {
+            for x in Swift.stride(from: left + 1, through: right - 2, by: sampleStride) {
+                let index = y * bytesPerRow + x
+                let laplacian = Double(4 * Int(pixels[index]) - Int(pixels[index - 1]) - Int(pixels[index + 1]) - Int(pixels[index - bytesPerRow]) - Int(pixels[index + bytesPerRow]))
+                sum += laplacian
+                sumSquared += laplacian * laplacian
+                count += 1
+            }
+        }
+        guard count > 0 else { return 0 }
+        let mean = sum / count
+        return max(0, sumSquared / count - mean * mean)
     }
 
     private func setPortraitOrientation() {

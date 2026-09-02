@@ -9,6 +9,8 @@ The iOS app is in the repository root. The Windows companion program is in `comp
 
 The iOS app uses `ezcan_logo.png` as its bundled welcome-screen logo.
 
+The capture camera has an `AUTO` lens mode that watches focus distance and center-frame sharpness. When a card is too close for the standard lens, it moves to the iPhone's ultra-wide macro camera and returns to the standard camera after the subject is comfortably framed again. `1X` and `MACRO` are also available for manual control. Devices without an ultra-wide camera keep the standard camera active.
+
 ## Current MVP
 
 - Pair with the computer using a QR code or manual URL and token.
@@ -37,6 +39,10 @@ The project targets iOS 17 or newer and uses the bundle identifier `com.undu.ezc
 The workflow at `.github/workflows/build-ios.yml` builds an arm64 iOS IPA on every push to `main`, every pull request, and manual workflow dispatch. The app is packaged without an ad-hoc signature so AltServer can sign it with your Apple ID before installation. Pushes to `main` publish a direct [Ezcan-unsigned.ipa download](https://github.com/U-N-D-O/ezcan/releases/download/ezcan-latest/Ezcan-unsigned.ipa) as well as the `ezcan-ios-ipa` artifact. Use the direct `.ipa` download with AltStore or AltServer; GitHub artifact downloads are outer ZIP files, so they must be extracted before importing the inner `Ezcan-unsigned.ipa`.
 
 The unsigned IPA is not directly installable by iOS until AltStore or AltServer signs it. A future distribution workflow can add Apple Developer signing, but no signing secrets are needed for the current AltServer workflow. Never commit certificates, profiles, private keys, or passwords.
+
+## Repository delivery
+
+Repository-level instructions for future coding chats are in `.github/copilot-instructions.md`. Completed implementation work should be validated, committed, and pushed to `main` unless the user explicitly asks to keep it local.
 
 ## iPhone-to-computer connection
 
