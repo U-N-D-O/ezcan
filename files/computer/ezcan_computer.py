@@ -292,12 +292,12 @@ class Store:
             ).fetchone()
             schema_version = int(version_row[0]) if version_row else 1
             columns = {row[1] for row in connection.execute("PRAGMA table_info(cards)")}
-            if schema_version < 2 and "grade_company" not in columns:
+            if "grade_company" not in columns:
                 connection.execute("ALTER TABLE cards ADD COLUMN grade_company TEXT")
-            if schema_version < 2 and "grade" not in columns:
+            if "grade" not in columns:
                 connection.execute("ALTER TABLE cards ADD COLUMN grade TEXT")
             intake_columns = {row[1] for row in connection.execute("PRAGMA table_info(intakes)")}
-            if schema_version < 3 and "details_json" not in intake_columns:
+            if "details_json" not in intake_columns:
                 connection.execute("ALTER TABLE intakes ADD COLUMN details_json TEXT")
             connection.execute(
                 "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?) "
@@ -342,6 +342,8 @@ class Store:
                     continue
                 try:
                     stored_details = json.loads(str(intake["details_json"] or "{}"))
+                    if not isinstance(stored_details, dict):
+                        raise TypeError("Stored card details must be an object")
                     card_details = validate_card_details(stored_details)
                 except (TypeError, json.JSONDecodeError, HTTPException):
                     card_details = validate_card_details({})
@@ -385,6 +387,10 @@ class Store:
                         intake["note"],
                     ),
                 )
+                connection.execute(
+                    "INSERT INTO archive_sequence (id, latest_code) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET latest_code = excluded.latest_code",
+                    (archive_code,),
+                )
                 recovered_manifests.append(
                     (
                         final_path,
@@ -396,6 +402,54 @@ class Store:
                             "createdAt": intake["created_at"],
                             "listingDetails": card_details,
                             "media": manifest_media,
+                        },
+                    )
+                )
+            cards_without_manifests = connection.execute(
+                """
+                SELECT cards.*, intakes.intake_id AS source_intake_id, intakes.created_at AS intake_created_at
+                FROM cards
+                LEFT JOIN intakes ON intakes.internal_id = cards.internal_id
+                WHERE cards.folder_path IS NOT NULL
+                """
+            ).fetchall()
+            for card in cards_without_manifests:
+                manifest_path = Path(card["folder_path"]) / "manifest.json"
+                if manifest_path.is_file():
+                    continue
+                media = (
+                    connection.execute(
+                        "SELECT * FROM media WHERE intake_id = ? ORDER BY id",
+                        (card["source_intake_id"],),
+                    ).fetchall()
+                    if card["source_intake_id"]
+                    else []
+                )
+                recovered_manifests.append(
+                    (
+                        Path(card["folder_path"]),
+                        {
+                            "archiveCode": card["archive_code"],
+                            "internalId": card["internal_id"],
+                            "intakeId": card["source_intake_id"],
+                            "status": card["status"],
+                            "createdAt": card["intake_created_at"] or card["created_at"],
+                            "listingDetails": {
+                                "language": card["language"] or "japanese",
+                                "condition": card["condition"] or "near_mint",
+                                "gradeCompany": card["grade_company"] or "none",
+                                "grade": card["grade"] or "",
+                                "authenticityStatus": card["authenticity_status"] or "authenticated",
+                            },
+                            "media": [
+                                {
+                                    "fileName": item["file_name"],
+                                    "type": item["media_type"],
+                                    "sha256": item["file_hash"],
+                                    "size": item["file_size"],
+                                }
+                                for item in media
+                            ],
                         },
                     )
                 )
@@ -559,12 +613,32 @@ class Store:
 
     def recent_cards(self) -> list[sqlite3.Row]:
         with self.connection() as connection:
-            return connection.execute("SELECT * FROM cards ORDER BY created_at DESC LIMIT 25").fetchall()
+            return connection.execute(
+                """
+                SELECT * FROM (
+                    SELECT * FROM cards
+                    UNION ALL
+                    SELECT internal_id, archive_code, temporary_path, status, created_at, created_at,
+                        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, note
+                    FROM intakes
+                    WHERE status = 'recovery_required'
+                ) activity
+                ORDER BY created_at DESC
+                LIMIT 25
+                """
+            ).fetchall()
 
     def card_by_archive_code(self, archive_code: str) -> sqlite3.Row | None:
         with self.connection() as connection:
             return connection.execute(
                 "SELECT * FROM cards WHERE archive_code = ?", (archive_code,)
+            ).fetchone()
+
+    def recovery_by_archive_code(self, archive_code: str) -> sqlite3.Row | None:
+        with self.connection() as connection:
+            return connection.execute(
+                "SELECT * FROM intakes WHERE archive_code = ? AND status = 'recovery_required'",
+                (archive_code,),
             ).fetchone()
 
     def start_ebay_search(self, card: sqlite3.Row, image_path: Path) -> str:
@@ -1520,7 +1594,7 @@ class DesktopWindow:
         for item in self.tree.get_children():
             self.tree.delete(item)
         for index, card in enumerate(self.store.recent_cards()):
-            identity = str(card["card_name"] or "Needs identity")
+            identity = "Recovery required" if card["status"] == "recovery_required" else str(card["card_name"] or "Needs identity")
             details = self.card_details_text(card)
             self.tree.insert(
                 "",
@@ -1536,6 +1610,8 @@ class DesktopWindow:
         self.root.after(1500, self.refresh)
 
     def card_details_text(self, card: sqlite3.Row) -> str:
+        if card["status"] == "recovery_required":
+            return "Archive move interrupted"
         language = "English" if card["language"] == "english" else "Japanese"
         condition = str(card["condition"] or "").replace("_", " ").title()
         grade = f" / {card['grade_company'].upper()} {card['grade']}" if card["grade_company"] and card["grade_company"] != "none" else ""
@@ -1558,6 +1634,16 @@ class DesktopWindow:
         self.selected_archive_code = str(selected[0])
         card = self.store.card_by_archive_code(self.selected_archive_code)
         if card is None:
+            recovery = self.store.recovery_by_archive_code(self.selected_archive_code)
+            if recovery is not None:
+                self.selected_card_var.set(f"{recovery['archive_code']}  Recovery required")
+                self.selected_state_var.set("RECOVERY REQUIRED")
+                self.selected_details_var.set(
+                    "The archive move was interrupted before Ezcan could finish the database record.\n"
+                    "Open the archive folder and resolve this intake before starting eBay research."
+                )
+                self.selected_photo = None
+                self.selected_preview.configure(image="", text="Archive recovery needed")
             return
         self.selected_card_var.set(f"{card['archive_code']}  {card['card_name'] or 'Identity not confirmed'}")
         self.selected_state_var.set(str(card["status"]).replace("_", " ").upper())

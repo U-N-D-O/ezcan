@@ -87,6 +87,7 @@ def test_interrupted_finalization_rebuilds_moved_card(tmp_path: Path) -> None:
     assert card["internal_id"] == internal_id
     assert card["language"] == "english"
     assert (final_path / "manifest.json").is_file()
+    assert recovered.create_intake(None)[2] == increment_archive_code(archive_code)
 
 
 def test_interrupted_finalization_before_move_returns_to_uploading(tmp_path: Path) -> None:
@@ -102,6 +103,23 @@ def test_interrupted_finalization_before_move_returns_to_uploading(tmp_path: Pat
     recovered = Store(root)
 
     assert recovered.intake(intake_id)["status"] == "uploading"
+
+
+def test_recovery_required_intake_is_visible_in_recent_activity(tmp_path: Path) -> None:
+    root = tmp_path / "archive"
+    store = Store(root)
+    intake_id, _temporary_path, archive_code = store.create_intake(None)
+    with store.connection() as connection:
+        connection.execute(
+            "UPDATE intakes SET status = 'recovery_required' WHERE intake_id = ?",
+            (intake_id,),
+        )
+
+    activity = Store(root).recent_cards()
+
+    recovery = next(item for item in activity if item["archive_code"] == archive_code)
+    assert recovery["status"] == "recovery_required"
+    assert recovery["folder_path"].endswith(f"uploading-{intake_id}")
 
 
 def test_archive_codes_increment_in_storage_order() -> None:
@@ -565,6 +583,10 @@ def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path)
 
     app.state.store.set_listing_status(archive_code, "rejected")
     assert app.state.store.latest_listing_draft(archive_code)["status"] == "rejected"
+
+    (Path(card["folder_path"]) / "manifest.json").unlink()
+    Store(app.state.store.root)
+    assert (Path(card["folder_path"]) / "manifest.json").is_file()
 
 
 def test_recommend_price_separates_sold_active_and_owner_shipping() -> None:
