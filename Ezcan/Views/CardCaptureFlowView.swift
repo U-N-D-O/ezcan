@@ -42,6 +42,8 @@ struct CardCaptureFlowView: View {
     @State private var statusMessage: String?
     @State private var sharedFilesPresented = false
     @State private var hasStarted = false
+    @State private var cardGeneration = 0
+    @State private var isCameraDismissing = false
 
     var body: some View {
         ZStack {
@@ -49,13 +51,13 @@ struct CardCaptureFlowView: View {
             content
         }
         .preferredColorScheme(.dark)
-        .task {
+        .task(id: cardGeneration) {
             guard !hasStarted else { return }
             hasStarted = true
             await createIntake()
         }
         .onChange(of: phase) { _, newPhase in
-            if case .capturing(let stage) = newPhase, cameraStage == nil, !isBusy {
+            if case .capturing(let stage) = newPhase, cameraStage == nil, !isBusy, !isCameraDismissing {
                 cameraStage = stage
             }
         }
@@ -65,22 +67,27 @@ struct CardCaptureFlowView: View {
                 mode: stage.cameraMode,
                 onPhoto: { media in
                     cameraStage = nil
+                    isCameraDismissing = true
                     upload(media, for: stage)
                 },
                 onVideo: { media in
                     cameraStage = nil
+                    isCameraDismissing = true
                     upload(media, for: stage)
                 },
                 onBack: {
                     cameraStage = nil
+                    isCameraDismissing = false
                     goBack(from: stage)
                 },
                 onNext: {
                     cameraStage = nil
+                    isCameraDismissing = false
                     goNext(from: stage)
                 },
                 onCancel: {
                     cameraStage = nil
+                    isCameraDismissing = false
                     phase = stage == .front || stage == .back ? .options : .options
                 }
             )
@@ -346,6 +353,7 @@ struct CardCaptureFlowView: View {
                     }
                 }
                 .buttonStyle(EzcanPrimaryButtonStyle(color: EzcanTheme.blue))
+                .frame(maxWidth: .infinity, minHeight: 64)
                 .disabled(!ArchiveCodeRules.isValid(archiveCode) || isBusy)
             }
             .padding(.horizontal, 22)
@@ -446,15 +454,35 @@ struct CardCaptureFlowView: View {
                 await MainActor.run {
                     isBusy = false
                     statusMessage = "Sent \(namedMedia.fileName)"
-                    phase = nextPhase(after: stage)
+                    moveToNextPhase(after: stage)
                 }
             } catch {
                 await MainActor.run {
                     isBusy = false
                     statusMessage = "Upload failed: \(error.localizedDescription)"
-                    phase = .capturing(stage)
+                    reopenCamera(after: .capturing(stage), stage: stage)
                 }
             }
+        }
+    }
+
+    private func moveToNextPhase(after stage: CaptureStage) {
+        let next = nextPhase(after: stage)
+        phase = next
+        guard case .capturing(let nextStage) = next else {
+            isCameraDismissing = false
+            return
+        }
+        reopenCamera(after: next, stage: nextStage)
+    }
+
+    private func reopenCamera(after nextPhase: CapturePhase, stage: CaptureStage) {
+        phase = nextPhase
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard case .capturing = phase, !isBusy else { return }
+            isCameraDismissing = false
+            cameraStage = stage
         }
     }
 
@@ -516,6 +544,8 @@ struct CardCaptureFlowView: View {
         isBusy = false
         statusMessage = nil
         hasStarted = false
+        isCameraDismissing = false
+        cardGeneration += 1
     }
 }
 private enum ArchiveCodeRules {

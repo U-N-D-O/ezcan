@@ -440,12 +440,19 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                   !self.isRecording,
                   let targetCamera = closeUp ? self.closeUpCamera : self.standardCamera,
                   targetCamera.uniqueID != self.cameraDevice?.uniqueID,
-                  let targetInput = try? AVCaptureDeviceInput(device: targetCamera),
-                  self.session.canAddInput(targetInput) else { return }
+                  let targetInput = try? AVCaptureDeviceInput(device: targetCamera) else { return }
 
             self.session.beginConfiguration()
             if let currentInput = self.cameraInput {
                 self.session.removeInput(currentInput)
+            }
+            guard self.session.canAddInput(targetInput) else {
+                if let currentInput = self.cameraInput, self.session.canAddInput(currentInput) {
+                    self.session.addInput(currentInput)
+                }
+                self.session.commitConfiguration()
+                self.updateStatus(closeUp ? "Macro camera is unavailable" : "Standard camera is unavailable")
+                return
             }
             self.session.addInput(targetInput)
             self.cameraInput = targetInput
@@ -607,12 +614,16 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
               let image = UIImage(data: data),
               let jpegData = image.jpegData(compressionQuality: 0.9),
               let url = save(jpegData, extension: "jpg") else {
-            statusLabel.text = "Could not capture photo"
+            updateStatus("Could not capture photo")
             return
         }
         hasFinished = true
-        session.stopRunning()
-        onPhoto(CapturedMedia(fileURL: url, kind: .image, fileName: url.lastPathComponent))
+        sessionQueue.async { [weak self] in
+            self?.session.stopRunning()
+            DispatchQueue.main.async { [weak self] in
+                self?.onPhoto(CapturedMedia(fileURL: url, kind: .image, fileName: url.lastPathComponent))
+            }
+        }
     }
 
     func fileOutput(
@@ -622,12 +633,16 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         error: Error?
     ) {
         guard error == nil else {
-            statusLabel.text = "Could not save video"
+            updateStatus("Could not save video")
             return
         }
         hasFinished = true
-        session.stopRunning()
-        onVideo(CapturedMedia(fileURL: outputFileURL, kind: .video, fileName: outputFileURL.lastPathComponent))
+        sessionQueue.async { [weak self] in
+            self?.session.stopRunning()
+            DispatchQueue.main.async { [weak self] in
+                self?.onVideo(CapturedMedia(fileURL: outputFileURL, kind: .video, fileName: outputFileURL.lastPathComponent))
+            }
+        }
     }
 
     private func save(_ data: Data, extension fileExtension: String) -> URL? {
