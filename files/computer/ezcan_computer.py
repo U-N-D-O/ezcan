@@ -26,7 +26,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ebay import open_picture_search
-from image_processor import prepare_search_image
+from image_processor import IMAGE_SUFFIXES, prepare_search_image
+from listing_drafts import build_listing_draft
+from pricing import PricingRecommendation, recommend_price
 
 
 SEQUENTIAL_ARCHIVE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -220,6 +222,36 @@ class Store:
                     started_at TEXT NOT NULL,
                     completed_at TEXT,
                     error TEXT
+                );
+                CREATE TABLE IF NOT EXISTS ebay_candidates (
+                    candidate_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    search_id TEXT NOT NULL,
+                    internal_id TEXT NOT NULL,
+                    archive_code TEXT NOT NULL,
+                    market_status TEXT NOT NULL,
+                    item_url TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    sale_or_listing_date TEXT,
+                    price REAL NOT NULL,
+                    shipping_price REAL NOT NULL,
+                    total_buyer_cost REAL NOT NULL,
+                    condition TEXT,
+                    grade TEXT,
+                    listing_format TEXT,
+                    seller_notes TEXT,
+                    screenshot_path TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS listings (
+                    listing_id TEXT PRIMARY KEY,
+                    internal_id TEXT NOT NULL,
+                    archive_code TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    draft_path TEXT NOT NULL,
+                    suggested_price_low REAL NOT NULL,
+                    suggested_price_high REAL NOT NULL,
+                    shipping_price REAL NOT NULL,
+                    created_at TEXT NOT NULL
                 );
                 """
             )
@@ -419,6 +451,163 @@ class Store:
                 "SELECT * FROM ebay_searches WHERE archive_code = ? ORDER BY started_at DESC LIMIT 1",
                 (archive_code,),
             ).fetchone()
+
+    def add_ebay_candidate(self, search_id: str, candidate: dict[str, object]) -> int:
+        market_status = str(candidate.get("market_status", "")).strip().lower()
+        if market_status not in {"sold", "active"}:
+            raise ValueError("Market status must be sold or active")
+        title = str(candidate.get("title", "")).strip()
+        item_url = str(candidate.get("item_url", "")).strip()
+        if not title:
+            raise ValueError("A candidate title is required")
+        if not item_url.startswith(("http://", "https://")):
+            raise ValueError("A valid eBay listing URL is required")
+        try:
+            price = float(candidate.get("price", 0))
+            shipping_price = float(candidate.get("shipping_price", 0))
+        except (TypeError, ValueError) as error:
+            raise ValueError("Item and shipping prices must be numbers") from error
+        if price < 0 or shipping_price < 0:
+            raise ValueError("Item and shipping prices cannot be negative")
+        with self.connection() as connection:
+            search = connection.execute(
+                "SELECT internal_id, archive_code FROM ebay_searches WHERE search_id = ?",
+                (search_id,),
+            ).fetchone()
+            if search is None:
+                raise ValueError("eBay search session was not found")
+            cursor = connection.execute(
+                """INSERT INTO ebay_candidates (
+                    search_id, internal_id, archive_code, market_status, item_url, title,
+                    sale_or_listing_date, price, shipping_price, total_buyer_cost,
+                    condition, grade, listing_format, seller_notes, screenshot_path, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    search_id,
+                    search["internal_id"],
+                    search["archive_code"],
+                    market_status,
+                    item_url,
+                    title,
+                    str(candidate.get("sale_or_listing_date", "")).strip() or None,
+                    price,
+                    shipping_price,
+                    price + shipping_price,
+                    str(candidate.get("condition", "")).strip() or None,
+                    str(candidate.get("grade", "")).strip() or None,
+                    str(candidate.get("listing_format", "")).strip() or None,
+                    str(candidate.get("seller_notes", "")).strip() or None,
+                    str(candidate.get("screenshot_path", "")).strip() or None,
+                    utc_now(),
+                ),
+            )
+            connection.execute(
+                "UPDATE ebay_searches SET status = 'candidate_recorded' WHERE search_id = ?",
+                (search_id,),
+            )
+            return int(cursor.lastrowid)
+
+    def ebay_candidates(self, archive_code: str) -> list[sqlite3.Row]:
+        with self.connection() as connection:
+            return connection.execute(
+                "SELECT * FROM ebay_candidates WHERE archive_code = ? ORDER BY created_at DESC",
+                (archive_code,),
+            ).fetchall()
+
+    def market_recommendation(self, archive_code: str) -> PricingRecommendation:
+        card = self.card_by_archive_code(archive_code)
+        if card is None:
+            raise ValueError("Card was not found")
+        if card["status"] != "identified":
+            raise ValueError("Confirm the card identity before calculating pricing")
+        return recommend_price(dict(candidate) for candidate in self.ebay_candidates(archive_code))
+
+    def create_listing_draft(self, archive_code: str) -> Path:
+        card = self.card_by_archive_code(archive_code)
+        if card is None:
+            raise ValueError("Card was not found")
+        if card["status"] != "identified":
+            raise ValueError("Confirm the card identity before creating a listing draft")
+        recommendation = self.market_recommendation(archive_code)
+        card_folder = Path(card["folder_path"])
+        image_paths = [
+            str(path)
+            for path in sorted((card_folder / "original").iterdir())
+            if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+        ]
+        if not image_paths:
+            raise ValueError("At least one archived card image is required")
+        draft = build_listing_draft(dict(card), recommendation, image_paths)
+        draft_path = card_folder / "generated" / "listing-draft.json"
+        draft_path.parent.mkdir(parents=True, exist_ok=True)
+        draft_path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
+        listing_id = str(uuid.uuid4())
+        with self.connection() as connection:
+            connection.execute(
+                """INSERT INTO listings (
+                    listing_id, internal_id, archive_code, status, draft_path,
+                    suggested_price_low, suggested_price_high, shipping_price, created_at
+                ) VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)""",
+                (
+                    listing_id,
+                    card["internal_id"],
+                    archive_code,
+                    str(draft_path),
+                    float(recommendation.suggested_item_low),
+                    float(recommendation.suggested_item_high),
+                    float(recommendation.owner_shipping_charge),
+                    utc_now(),
+                ),
+            )
+        return draft_path
+
+    def latest_listing_draft(self, archive_code: str) -> sqlite3.Row | None:
+        with self.connection() as connection:
+            return connection.execute(
+                "SELECT * FROM listings WHERE archive_code = ? ORDER BY created_at DESC LIMIT 1",
+                (archive_code,),
+            ).fetchone()
+
+    def confirm_card_identity(self, archive_code: str, identity: dict[str, object]) -> None:
+        card_name = str(identity.get("card_name", "")).strip()
+        set_name = str(identity.get("set_name", "")).strip()
+        card_number = str(identity.get("card_number", "")).strip()
+        if not card_name or not set_name or not card_number:
+            raise ValueError("Card name, set, and card number are required")
+        now = utc_now()
+        with self.connection() as connection:
+            card = connection.execute(
+                "SELECT internal_id FROM cards WHERE archive_code = ?", (archive_code,)
+            ).fetchone()
+            search = connection.execute(
+                "SELECT search_id FROM ebay_searches WHERE archive_code = ? ORDER BY started_at DESC LIMIT 1",
+                (archive_code,),
+            ).fetchone()
+            if card is None or search is None:
+                raise ValueError("An eBay search session is required before identity confirmation")
+            if connection.execute(
+                "SELECT 1 FROM ebay_candidates WHERE archive_code = ? LIMIT 1", (archive_code,)
+            ).fetchone() is None:
+                raise ValueError("Record at least one eBay match before confirming identity")
+            connection.execute(
+                """UPDATE cards SET card_name = ?, set_name = ?, card_number = ?, edition = ?,
+                    printing = ?, finish = ?, status = 'identified', updated_at = ?
+                    WHERE archive_code = ?""",
+                (
+                    card_name,
+                    set_name,
+                    card_number,
+                    str(identity.get("edition", "")).strip() or None,
+                    str(identity.get("printing", "")).strip() or None,
+                    str(identity.get("finish", "")).strip() or None,
+                    now,
+                    archive_code,
+                ),
+            )
+            connection.execute(
+                "UPDATE ebay_searches SET status = 'identity_confirmed', completed_at = ? WHERE search_id = ?",
+                (now, search["search_id"]),
+            )
 
     def shared_files(self) -> list[dict[str, object]]:
         files = []
@@ -663,6 +852,9 @@ class DesktopWindow:
         self.media_var = tk.StringVar(value="0")
         self.updated_var = tk.StringVar(value="Waiting for activity")
         self.research_var = tk.StringVar(value="Select an archived card to search")
+        self.candidate_var = tk.StringVar(value="Record a selected eBay result")
+        self.identity_var = tk.StringVar(value="Confirm the exact card identity")
+        self.draft_var = tk.StringVar(value="Create a local draft after confirmation")
         self.qr_photo: tk.PhotoImage | None = None
         self.tree: ttk.Treeview
         self.build_styles()
@@ -861,9 +1053,15 @@ class DesktopWindow:
         strip.grid_columnconfigure(0, weight=1)
         strip.grid_columnconfigure(1, weight=1)
         strip.grid_columnconfigure(2, weight=1)
+        strip.grid_columnconfigure(3, weight=1)
+        strip.grid_columnconfigure(4, weight=1)
+        strip.grid_columnconfigure(5, weight=1)
         self.action_line(strip, 0, "ARCHIVE", self.archive_var, "OPEN", self.open_archive, self.blue)
         self.action_line(strip, 1, "SEND TO IPHONE", self.transfer_var, "CHOOSE", self.choose_file_for_iphone, self.magenta)
         self.action_line(strip, 2, "EBAY PICTURE SEARCH", self.research_var, "SEARCH", self.search_selected_card, self.green)
+        self.action_line(strip, 3, "EBAY MATCH", self.candidate_var, "ADD", self.record_selected_candidate, self.amber)
+        self.action_line(strip, 4, "CARD IDENTITY", self.identity_var, "REVIEW", self.review_selected_matches, self.cyan)
+        self.action_line(strip, 5, "LISTING DRAFT", self.draft_var, "MAKE", self.create_draft_for_selected_card, self.blue)
         return strip
 
     def action_line(self, parent: tk.Misc, column: int, title: str, value: tk.StringVar, button_text: str, command, accent: str) -> None:
@@ -1141,6 +1339,208 @@ class DesktopWindow:
                 self.store.finish_ebay_search(search_id, "failed", str(error))
             self.research_var.set(f"{archive_code}: search preparation failed")
             messagebox.showerror("eBay Picture Search", f"Could not prepare the search.\n\n{error}")
+
+    def record_selected_candidate(self) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("Record eBay Match", "Select an archived card first.")
+            return
+        values = self.tree.item(selected[0], "values")
+        archive_code = str(values[0]) if values else ""
+        card = self.store.card_by_archive_code(archive_code)
+        search = self.store.latest_ebay_search(archive_code)
+        if card is None or search is None:
+            messagebox.showinfo("Record eBay Match", "Run an eBay picture search for this card first.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Record eBay Match - {archive_code}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        body = tk.Frame(dialog, bg=self.panel, padx=24, pady=20)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text=f"RECORD COMPARABLE  //  {archive_code}", bg=self.panel, fg=self.cyan, font=("Consolas", 10, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 16))
+
+        fields: dict[str, tk.StringVar] = {
+            "market_status": tk.StringVar(value="sold"),
+            "title": tk.StringVar(),
+            "item_url": tk.StringVar(),
+            "sale_or_listing_date": tk.StringVar(),
+            "price": tk.StringVar(value="0"),
+            "shipping_price": tk.StringVar(value="0"),
+            "condition": tk.StringVar(value=str(card["condition"] or "")),
+            "grade": tk.StringVar(value=str(card["grade"] or "")),
+            "listing_format": tk.StringVar(value="fixed_price"),
+            "screenshot_path": tk.StringVar(),
+        }
+        labels = (
+            ("MARKET STATUS", "market_status"),
+            ("TITLE", "title"),
+            ("EBAY URL", "item_url"),
+            ("SALE / LISTING DATE", "sale_or_listing_date"),
+            ("ITEM PRICE", "price"),
+            ("SHIPPING PRICE", "shipping_price"),
+            ("CONDITION", "condition"),
+            ("GRADE", "grade"),
+            ("LISTING FORMAT", "listing_format"),
+        )
+        for row, (label, key) in enumerate(labels, start=1):
+            tk.Label(body, text=label, bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).grid(row=row, column=0, sticky="w", padx=(0, 16), pady=5)
+            if key == "market_status":
+                widget = ttk.Combobox(body, textvariable=fields[key], values=("sold", "active"), state="readonly", width=34)
+            elif key == "listing_format":
+                widget = ttk.Combobox(body, textvariable=fields[key], values=("fixed_price", "auction"), state="readonly", width=34)
+            else:
+                widget = tk.Entry(body, textvariable=fields[key], width=38)
+            widget.grid(row=row, column=1, sticky="ew", pady=5)
+
+        tk.Label(body, text="SELLER NOTES", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).grid(row=10, column=0, sticky="nw", padx=(0, 16), pady=5)
+        notes = tk.Text(body, width=36, height=4, wrap="word")
+        notes.grid(row=10, column=1, sticky="ew", pady=5)
+        tk.Label(body, text="SCREENSHOT", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).grid(row=11, column=0, sticky="w", padx=(0, 16), pady=5)
+        screenshot_row = tk.Frame(body, bg=self.panel)
+        screenshot_row.grid(row=11, column=1, sticky="ew", pady=5)
+        tk.Entry(screenshot_row, textvariable=fields["screenshot_path"], width=27).pack(side="left")
+        tk.Button(screenshot_row, text="BROWSE", command=lambda: fields["screenshot_path"].set(filedialog.askopenfilename(title="Choose eBay screenshot") or fields["screenshot_path"].get())).pack(side="left", padx=(6, 0))
+
+        def save() -> None:
+            try:
+                candidate_id = self.store.add_ebay_candidate(
+                    str(search["search_id"]),
+                    {
+                        **{key: value.get() for key, value in fields.items()},
+                        "seller_notes": notes.get("1.0", "end").strip(),
+                    },
+                )
+            except ValueError as error:
+                messagebox.showerror("Record eBay Match", str(error), parent=dialog)
+                return
+            self.candidate_var.set(f"{archive_code}: candidate #{candidate_id} saved")
+            dialog.destroy()
+
+        buttons = tk.Frame(body, bg=self.panel)
+        buttons.grid(row=12, column=0, columnspan=2, sticky="e", pady=(18, 0))
+        tk.Button(buttons, text="CANCEL", command=dialog.destroy).pack(side="right", padx=(8, 0))
+        tk.Button(buttons, text="SAVE MATCH", command=save).pack(side="right")
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.bind("<Return>", lambda _event: save())
+        dialog.focus_force()
+
+    def review_selected_matches(self) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("Confirm Card Identity", "Select an archived card first.")
+            return
+        values = self.tree.item(selected[0], "values")
+        archive_code = str(values[0]) if values else ""
+        card = self.store.card_by_archive_code(archive_code)
+        candidates = self.store.ebay_candidates(archive_code)
+        if card is None or not candidates:
+            messagebox.showinfo("Confirm Card Identity", "Record at least one eBay match for this card first.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Confirm Card Identity - {archive_code}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("980x700")
+        dialog.minsize(820, 600)
+        body = tk.Frame(dialog, bg=self.panel, padx=24, pady=20)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text=f"REVIEW MATCHES  //  {archive_code}", bg=self.panel, fg=self.cyan, font=("Consolas", 11, "bold")).pack(anchor="w")
+        tk.Label(body, text="Compare the saved results, then enter the exact identity before continuing.", bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 14))
+
+        table_frame = tk.Frame(body, bg=self.panel_deep)
+        table_frame.pack(fill="both", expand=True)
+        candidate_tree = ttk.Treeview(table_frame, columns=("status", "title", "price", "shipping", "total", "url"), show="headings", height=8)
+        headings = {"status": "STATUS", "title": "TITLE", "price": "ITEM", "shipping": "SHIPPING", "total": "TOTAL", "url": "URL"}
+        widths = {"status": 80, "title": 260, "price": 75, "shipping": 85, "total": 75, "url": 260}
+        for column, title in headings.items():
+            candidate_tree.heading(column, text=title, anchor="w")
+            candidate_tree.column(column, width=widths[column], anchor="w", stretch=column in {"title", "url"})
+        for candidate in candidates:
+            candidate_tree.insert("", "end", values=(candidate["market_status"], candidate["title"], f"${candidate['price']:.2f}", f"${candidate['shipping_price']:.2f}", f"${candidate['total_buyer_cost']:.2f}", candidate["item_url"]))
+        candidate_tree.pack(side="left", fill="both", expand=True)
+        candidate_scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=candidate_tree.yview)
+        candidate_scrollbar.pack(side="right", fill="y")
+        candidate_tree.configure(yscrollcommand=candidate_scrollbar.set)
+
+        identity = tk.Frame(body, bg=self.panel)
+        identity.pack(fill="x", pady=(20, 0))
+        fields = {
+            "card_name": tk.StringVar(value=str(card["card_name"] or "")),
+            "set_name": tk.StringVar(value=str(card["set_name"] or "")),
+            "card_number": tk.StringVar(value=str(card["card_number"] or "")),
+            "edition": tk.StringVar(value=str(card["edition"] or "")),
+            "printing": tk.StringVar(value=str(card["printing"] or "")),
+            "finish": tk.StringVar(value=str(card["finish"] or "")),
+        }
+        labels = (("CARD NAME", "card_name"), ("SET", "set_name"), ("CARD NUMBER", "card_number"), ("EDITION", "edition"), ("PRINTING", "printing"), ("FINISH", "finish"))
+        for index, (label, key) in enumerate(labels):
+            row, column = divmod(index, 2)
+            cell = tk.Frame(identity, bg=self.panel)
+            cell.grid(row=row, column=column, sticky="ew", padx=(0 if column == 0 else 16, 16 if column == 0 else 0), pady=4)
+            tk.Label(cell, text=label, bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w")
+            tk.Entry(cell, textvariable=fields[key], width=38).pack(fill="x", pady=(3, 0))
+        identity.grid_columnconfigure(0, weight=1)
+        identity.grid_columnconfigure(1, weight=1)
+
+        pricing_var = tk.StringVar(value="Pricing is available after identity confirmation and a sold comparable.")
+        tk.Label(body, textvariable=pricing_var, bg=self.panel, fg=self.text, justify="left", anchor="w", wraplength=880, font=("Segoe UI", 9)).pack(fill="x", pady=(14, 0))
+
+        def refresh_pricing() -> None:
+            try:
+                recommendation = self.store.market_recommendation(archive_code)
+            except ValueError as error:
+                pricing_var.set(f"Pricing unavailable: {error}")
+                return
+            pricing_var.set(
+                f"SOLD {recommendation.sold_count}  |  MEDIAN BUYER TOTAL ${recommendation.median_sold_total:.2f}  |  "
+                f"ACTIVE {recommendation.active_count}\n"
+                f"Suggested card price ${recommendation.suggested_item_low:.2f}-${recommendation.suggested_item_high:.2f} "
+                f"+ ${recommendation.owner_shipping_charge:.2f} first-item shipping "
+                f"(${recommendation.suggested_total_low:.2f}-${recommendation.suggested_total_high:.2f} buyer total)\n"
+                f"Estimated fees ${recommendation.estimated_fee_low:.2f}-${recommendation.estimated_fee_high:.2f}; "
+                "profit shown before card cost and postage"
+            )
+        refresh_pricing()
+
+        def confirm() -> None:
+            try:
+                self.store.confirm_card_identity(
+                    archive_code,
+                    {key: value.get() for key, value in fields.items()},
+                )
+            except ValueError as error:
+                messagebox.showerror("Confirm Card Identity", str(error), parent=dialog)
+                return
+            self.identity_var.set(f"{archive_code}: identity confirmed")
+            dialog.destroy()
+
+        buttons = tk.Frame(body, bg=self.panel)
+        buttons.pack(fill="x", pady=(18, 0))
+        tk.Button(buttons, text="REFRESH PRICING", command=refresh_pricing).pack(side="left")
+        tk.Button(buttons, text="CANCEL", command=dialog.destroy).pack(side="right", padx=(8, 0))
+        tk.Button(buttons, text="CONFIRM IDENTITY", command=confirm).pack(side="right")
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.focus_force()
+
+    def create_draft_for_selected_card(self) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("Listing Draft", "Select an archived card first.")
+            return
+        values = self.tree.item(selected[0], "values")
+        archive_code = str(values[0]) if values else ""
+        try:
+            draft_path = self.store.create_listing_draft(archive_code)
+        except (OSError, ValueError) as error:
+            self.draft_var.set(f"{archive_code}: draft unavailable")
+            messagebox.showerror("Listing Draft", f"Could not create the local draft.\n\n{error}")
+            return
+        self.draft_var.set(f"{archive_code}: draft saved")
+        messagebox.showinfo("Listing Draft", f"Draft saved locally at:\n\n{draft_path}\n\nNothing was published to eBay.")
 
     def copy_text(self, value: str) -> None:
         self.root.clipboard_clear()

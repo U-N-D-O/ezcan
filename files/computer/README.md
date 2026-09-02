@@ -16,9 +16,13 @@ Windows companion program for the Ezcan iOS capture app.
 - SQLite records and `manifest.json` files.
 - Prepared eBay search images generated from the archived front photo.
 - Visible browser-assisted eBay picture search launch from the recent-card table.
+- Manual eBay match recording with sold/active prices, shipping, URLs, and notes.
+- Explicit card-identity confirmation before pricing calculations.
+- Sold-comparable pricing summary with separate `$34` first-item shipping.
+- Local listing-draft JSON generated only after identity and pricing evidence are confirmed.
 - Local dashboard at `http://localhost:8765`.
 
-The eBay picture-search step opens eBay in the default browser, copies the prepared image path, and records an `awaiting_manual_upload` search session. In eBay, click the camera icon at the far right of the search field and choose that image manually. Seller credentials, CAPTCHA handling, market research, and listing drafts remain intentionally outside this alpha slice.
+The eBay picture-search step opens eBay in the default browser, copies the prepared image path, and records an `awaiting_manual_upload` search session. In eBay, click the camera icon at the far right of the search field and choose that image manually. Use `ADD` to record selected sold or active results, then `REVIEW` to confirm the exact card identity. Pricing uses sold buyer-paid totals as its evidence, keeps active results separate, and subtracts `$34` only when showing the suggested one-card item price. `MAKE` writes an unpublished `generated/listing-draft.json` file with card metadata, image paths, research, suggested prices, and shipping settings. Seller credentials, CAPTCHA handling, automated result scraping, and live publishing remain outside this alpha slice.
 
 ## Run from source
 

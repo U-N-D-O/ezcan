@@ -8,6 +8,7 @@ from PIL import Image
 from ebay import open_picture_search
 from ezcan_computer import create_app, default_data_root, increment_archive_code, program_directory
 from image_processor import prepare_search_image
+from pricing import recommend_price
 
 
 def test_default_archive_is_next_to_program() -> None:
@@ -336,3 +337,155 @@ def test_ebay_search_session_is_persisted(tmp_path: Path) -> None:
     assert search["search_id"] == search_id
     assert search["mode"] == "browser_assisted"
     assert search["status"] == "awaiting_manual_upload"
+
+
+def test_ebay_candidate_preserves_item_shipping_and_total(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "data")
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.token}"}
+    intake_id = client.post("/api/intakes", headers=headers, json={}).json()["intakeId"]
+    content = b"candidate-card"
+    media_headers = {
+        **headers,
+        "X-Ezcan-File-Name": "front.jpg",
+        "X-Ezcan-Media-Type": "image",
+        "X-Ezcan-SHA256": hashlib.sha256(content).hexdigest(),
+    }
+    assert client.post(f"/api/intakes/{intake_id}/media", headers=media_headers, content=content).status_code == 200
+    archive_code = client.post(f"/api/intakes/{intake_id}/complete", headers=headers, json={}).json()["archiveCode"]
+    card = app.state.store.card_by_archive_code(archive_code)
+    image_path = Path(card["folder_path"]) / "generated" / "ebay-search.jpg"
+    image_path.write_bytes(b"jpeg")
+    search_id = app.state.store.start_ebay_search(card, image_path)
+
+    candidate_id = app.state.store.add_ebay_candidate(
+        search_id,
+        {
+            "market_status": "sold",
+            "title": "Japanese Pokemon card comparable",
+            "item_url": "https://www.ebay.com/itm/123",
+            "sale_or_listing_date": "2026-09-01",
+            "price": "25.50",
+            "shipping_price": "4.50",
+            "condition": "near_mint",
+            "grade": "",
+            "listing_format": "fixed_price",
+            "seller_notes": "Matching holo and card number",
+        },
+    )
+
+    candidate = app.state.store.ebay_candidates(archive_code)[0]
+    search = app.state.store.latest_ebay_search(archive_code)
+    assert candidate["candidate_id"] == candidate_id
+    assert candidate["price"] == 25.5
+    assert candidate["shipping_price"] == 4.5
+    assert candidate["total_buyer_cost"] == 30.0
+    assert candidate["market_status"] == "sold"
+    assert candidate["seller_notes"] == "Matching holo and card number"
+    assert search["status"] == "candidate_recorded"
+
+
+def test_ebay_candidate_rejects_invalid_listing_url(tmp_path: Path) -> None:
+    from ezcan_computer import Store
+
+    store = Store(tmp_path / "data")
+
+    try:
+        store.add_ebay_candidate(
+            "missing-search",
+            {"market_status": "active", "title": "No URL", "item_url": "example.com"},
+        )
+    except ValueError as error:
+        assert "listing URL" in str(error)
+    else:
+        raise AssertionError("Expected invalid candidate data to fail")
+
+
+def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "data")
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.token}"}
+    intake_id = client.post("/api/intakes", headers=headers, json={}).json()["intakeId"]
+    content = b"identity-card"
+    media_headers = {
+        **headers,
+        "X-Ezcan-File-Name": "front.jpg",
+        "X-Ezcan-Media-Type": "image",
+        "X-Ezcan-SHA256": hashlib.sha256(content).hexdigest(),
+    }
+    assert client.post(f"/api/intakes/{intake_id}/media", headers=media_headers, content=content).status_code == 200
+    archive_code = client.post(f"/api/intakes/{intake_id}/complete", headers=headers, json={}).json()["archiveCode"]
+    card = app.state.store.card_by_archive_code(archive_code)
+    search_id = app.state.store.start_ebay_search(card, Path(card["folder_path"]) / "generated" / "ebay-search.jpg")
+    app.state.store.add_ebay_candidate(
+        search_id,
+        {
+            "market_status": "sold",
+            "title": "Charizard holo matching candidate",
+            "item_url": "https://www.ebay.com/itm/456",
+            "price": "90",
+            "shipping_price": "34",
+        },
+    )
+
+    app.state.store.confirm_card_identity(
+        archive_code,
+        {
+            "card_name": "Charizard",
+            "set_name": "Base Set",
+            "card_number": "4/102",
+            "edition": "Unlimited",
+            "printing": "Holo",
+            "finish": "Holofoil",
+        },
+    )
+
+    confirmed_card = app.state.store.card_by_archive_code(archive_code)
+    confirmed_search = app.state.store.latest_ebay_search(archive_code)
+    assert confirmed_card["status"] == "identified"
+    assert confirmed_card["card_name"] == "Charizard"
+    assert confirmed_card["set_name"] == "Base Set"
+    assert confirmed_card["card_number"] == "4/102"
+    assert confirmed_card["printing"] == "Holo"
+    assert confirmed_search["status"] == "identity_confirmed"
+
+    draft_path = app.state.store.create_listing_draft(archive_code)
+    draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    listing = app.state.store.latest_listing_draft(archive_code)
+    assert draft["status"] == "draft"
+    assert draft["title"] == "Japanese | Charizard | Base Set | 4/102"
+    assert draft["shipping"] == {"firstItemCharge": "34.00", "additionalItemsCharge": "0.00"}
+    assert draft["publishing"] == {"published": False, "sellerCredentialsUsed": False}
+    assert str(Path(card["folder_path"]) / "original" / "front.jpg") in draft["imagePaths"]
+    assert listing["status"] == "draft"
+    assert Path(listing["draft_path"]) == draft_path
+
+
+def test_recommend_price_separates_sold_active_and_owner_shipping() -> None:
+    recommendation = recommend_price(
+        [
+            {"market_status": "sold", "total_buyer_cost": "50"},
+            {"market_status": "sold", "total_buyer_cost": "70"},
+            {"market_status": "active", "total_buyer_cost": "90"},
+        ]
+    )
+
+    assert recommendation.sold_count == 2
+    assert recommendation.active_count == 1
+    assert recommendation.median_sold_total == 60
+    assert recommendation.lowest_sold_total == 50
+    assert recommendation.highest_sold_total == 70
+    assert recommendation.suggested_total_low == 54
+    assert recommendation.suggested_total_high == 66
+    assert recommendation.suggested_item_low == 20
+    assert recommendation.suggested_item_high == 32
+    assert recommendation.owner_shipping_charge == 34
+
+
+def test_recommend_price_requires_sold_evidence() -> None:
+    try:
+        recommend_price([{"market_status": "active", "total_buyer_cost": "50"}])
+    except ValueError as error:
+        assert "sold comparable" in str(error)
+    else:
+        raise AssertionError("Expected pricing without sold evidence to fail")
