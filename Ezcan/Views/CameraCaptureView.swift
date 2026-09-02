@@ -58,6 +58,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private let timerLabel = UILabel()
     private let statusLabel = UILabel()
     private let lensControl = UISegmentedControl(items: ["AUTO", "1X", "MACRO"])
+    private weak var captureButton: UIButton?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var cameraDevice: AVCaptureDevice?
     private var cameraInput: AVCaptureDeviceInput?
@@ -218,6 +219,8 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             guard let captureButton else { return }
             self?.capturePressed(captureButton)
         }, for: .touchUpInside)
+        self.captureButton = captureButton
+        captureButton.isEnabled = false
         view.addSubview(captureButton)
 
         let hint = makeLabel(
@@ -324,11 +327,13 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             self.closeUpCamera = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
             self.configureContinuousFocus(on: camera)
 
-            self.videoDataOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
-            self.videoDataOutput.alwaysDiscardsLateVideoFrames = true
-            self.videoDataOutput.setSampleBufferDelegate(self, queue: self.analysisQueue)
-            if self.session.canAddOutput(self.videoDataOutput) {
-                self.session.addOutput(self.videoDataOutput)
+            if self.mode == .video {
+                self.videoDataOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
+                self.videoDataOutput.alwaysDiscardsLateVideoFrames = true
+                self.videoDataOutput.setSampleBufferDelegate(self, queue: self.analysisQueue)
+                if self.session.canAddOutput(self.videoDataOutput) {
+                    self.session.addOutput(self.videoDataOutput)
+                }
             }
 
             if self.mode == .photo {
@@ -338,10 +343,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                     return
                 }
                 self.session.addOutput(self.photoOutput)
-                self.photoOutput.isHighResolutionCaptureEnabled = true
-                if let connection = self.photoOutput.connection(with: .video), connection.isVideoStabilizationSupported {
-                    connection.preferredVideoStabilizationMode = .auto
-                }
+                self.photoOutput.isHighResolutionCaptureEnabled = false
             } else {
                 guard self.session.canAddOutput(self.movieOutput) else {
                     self.session.commitConfiguration()
@@ -368,9 +370,13 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                 self.view.layoutIfNeeded()
                 self.setPortraitOrientation()
                 self.lensControl.isEnabled = self.closeUpCamera != nil
+                self.captureButton?.isEnabled = false
                 self.statusLabel.text = self.closeUpCamera == nil ? "Ready · Macro unavailable" : "Ready · Auto lens"
             }
             self.session.startRunning()
+            DispatchQueue.main.async { [weak self] in
+                self?.captureButton?.isEnabled = self?.session.isRunning == true
+            }
         }
     }
 
@@ -572,17 +578,37 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         photoCaptureInFlight = true
         hasFinished = true
         CrashReporter.shared.record("Starting photo capture")
-        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
-        settings.isHighResolutionPhotoEnabled = false
-        settings.photoQualityPrioritization = .quality
-        if let connection = photoOutput.connection(with: .video), connection.isVideoStabilizationSupported {
-            connection.preferredVideoStabilizationMode = .auto
-        }
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            guard self.session.isRunning,
+                  self.photoOutput.connection(with: .video) != nil else {
+                self.photoCaptureFailed("Camera session was not ready")
+                return
+            }
+            let settings: AVCapturePhotoSettings
+            if self.photoOutput.availablePhotoCodecTypes.contains(AVVideoCodecType.jpeg) {
+                settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            } else {
+                settings = AVCapturePhotoSettings()
+            }
+            settings.isHighResolutionPhotoEnabled = false
+            settings.photoQualityPrioritization = .balanced
+            if let connection = self.photoOutput.connection(with: .video), connection.isVideoStabilizationSupported {
+                connection.preferredVideoStabilizationMode = .auto
+            }
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
         updateStatus("Capturing high-quality card image...")
+    }
+
+    private func photoCaptureFailed(_ message: String) {
+        CrashReporter.shared.record("Photo capture failed: \(message)")
+        DispatchQueue.main.async { [weak self] in
+            self?.hasFinished = false
+            self?.photoCaptureInFlight = false
+            self?.captureButton?.isEnabled = true
+            self?.updateStatus("Could not capture photo")
+        }
     }
 
     private func startRecording(_ button: UIButton) {
