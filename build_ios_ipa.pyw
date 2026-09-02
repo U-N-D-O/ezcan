@@ -35,7 +35,7 @@ class EzcanIPABuilder:
         self.events = queue.Queue()
         self.worker = None
 
-        window.title("Ezcan / Build Console")
+        window.overrideredirect(True)
         window.geometry("760x720")
         window.minsize(620, 620)
         window.configure(bg=WHITE)
@@ -45,8 +45,25 @@ class EzcanIPABuilder:
 
         header = tk.Frame(outer, bg=WHITE)
         header.pack(fill="x")
+        header.bind("<ButtonPress-1>", self.begin_move)
+        header.bind("<B1-Motion>", self.move_window)
         tk.Label(header, text="EZCAN", bg=WHITE, fg=INK, font=("Segoe UI", 16, "bold"), anchor="w").pack(side="left")
         tk.Label(header, text="IOS BUILD CONSOLE", bg=WHITE, fg=MUTED, font=("Segoe UI", 9, "bold"), anchor="w").pack(side="left", padx=(12, 0), pady=(4, 0))
+        close_button = tk.Button(
+            header,
+            text="×",
+            command=self.close,
+            bg=WHITE,
+            fg=MUTED,
+            activebackground=CYAN_PALE,
+            activeforeground=INK,
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 16),
+            cursor="hand2",
+            padx=4,
+        )
+        close_button.pack(side="right", padx=(8, 0))
         self.online = tk.Label(header, text="●  ONLINE", bg=WHITE, fg=CYAN, font=("Segoe UI", 9, "bold"))
         self.online.pack(side="right", pady=(4, 0))
 
@@ -106,6 +123,16 @@ class EzcanIPABuilder:
         scrollbar.pack(side="right", fill="y")
 
         self.window.after(100, self.process_events)
+
+    def begin_move(self, event):
+        self.move_origin = (event.x_root, event.y_root, self.window.winfo_x(), self.window.winfo_y())
+
+    def move_window(self, event):
+        start_x, start_y, window_x, window_y = self.move_origin
+        self.window.geometry("+{}+{}".format(window_x + event.x_root - start_x, window_y + event.y_root - start_y))
+
+    def close(self):
+        self.window.destroy()
 
     def update_dial(self, percent, state, detail):
         self.dial.itemconfigure(self.dial_arc, extent=-3.6 * percent)
