@@ -7,6 +7,8 @@ struct EzcanApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var previousCrash: CrashReport?
     @State private var sharedFilesPresented = false
+    @State private var fileToOpen: SharedFileOpenItem?
+    @State private var sharedFileError: String?
 
     init() {
         CrashReporter.install()
@@ -28,19 +30,30 @@ struct EzcanApp: App {
                 }
                 .alert(item: $sharedFileMonitor.newlyReceivedFile) { file in
                     Alert(
-                        title: Text("File received"),
-                        message: Text("\(file.fileName) is ready on the computer. Open Files to download it."),
-                        primaryButton: .default(Text("View Files")) {
+                        title: Text("New file"),
+                        message: Text("\(file.fileName) is ready on the computer."),
+                        primaryButton: .default(Text("Open")) {
                             sharedFileMonitor.dismissNewFile()
-                            sharedFilesPresented = true
+                            downloadAndOpen(file)
                         },
                         secondaryButton: .cancel {
                             sharedFileMonitor.dismissNewFile()
                         }
                     )
                 }
+                .alert("File transfer failed", isPresented: Binding(
+                    get: { sharedFileError != nil },
+                    set: { if !$0 { sharedFileError = nil } }
+                )) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(sharedFileError ?? "The computer could not provide that file.")
+                }
                 .sheet(isPresented: $sharedFilesPresented) {
                     SharedFilesView()
+                }
+                .sheet(item: $fileToOpen) { item in
+                    ShareSheet(fileURL: item.url)
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
@@ -55,4 +68,21 @@ struct EzcanApp: App {
                 }
         }
     }
+
+    private func downloadAndOpen(_ file: SharedFile) {
+        guard let pairing = pairingStore.pairing else { return }
+        Task { @MainActor in
+            do {
+                let url = try await LocalReceiverClient(pairing: pairing).downloadSharedFile(file)
+                fileToOpen = SharedFileOpenItem(url: url)
+            } catch {
+                sharedFileError = error.localizedDescription
+            }
+        }
+    }
+}
+
+struct SharedFileOpenItem: Identifiable {
+    let id = UUID()
+    let url: URL
 }

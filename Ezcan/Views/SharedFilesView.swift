@@ -10,7 +10,6 @@ struct SharedFilesView: View {
     @State private var downloadingID: String?
     @State private var errorMessage: String?
     @State private var shareItem: ShareItem?
-    @State private var receivedFile: ReceivedFile?
 
     var body: some View {
         NavigationStack {
@@ -94,16 +93,6 @@ struct SharedFilesView: View {
             } message: {
                 Text(errorMessage ?? "The computer could not provide that file.")
             }
-            .alert(item: $receivedFile) { file in
-                Alert(
-                    title: Text("File downloaded"),
-                    message: Text("\(file.fileName) is ready in the Files app."),
-                    primaryButton: .default(Text("Open in Files")) {
-                        shareItem = ShareItem(url: file.url)
-                    },
-                    secondaryButton: .cancel(Text("OK"))
-                )
-            }
             .task { await refresh() }
             .onAppear {
                 sharedFileMonitor.isFilesPageVisible = true
@@ -139,39 +128,36 @@ struct SharedFilesView: View {
 
     private func fileCard(_ file: SharedFile) -> some View {
         let isIPA = file.fileName.lowercased().hasSuffix(".ipa")
-        return HStack(spacing: 14) {
-            Image(systemName: isIPA ? "iphone.gen3" : "doc.fill")
-                .font(.title3)
-                .foregroundStyle(isIPA ? EzcanTheme.cyan : EzcanTheme.amber)
-                .frame(width: 46, height: 46)
-                .background((isIPA ? EzcanTheme.cyan : EzcanTheme.amber).opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(file.fileName)
-                    .font(.headline)
-                    .foregroundStyle(EzcanTheme.ink)
-                    .lineLimit(1)
-                Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
-                    .font(.caption)
-                    .foregroundStyle(EzcanTheme.muted)
-            }
-            Spacer()
-            Button {
-                download(file)
-            } label: {
+        return Button {
+            download(file)
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: isIPA ? "iphone.gen3" : "doc.fill")
+                    .font(.title3)
+                    .foregroundStyle(isIPA ? EzcanTheme.cyan : EzcanTheme.amber)
+                    .frame(width: 46, height: 46)
+                    .background((isIPA ? EzcanTheme.cyan : EzcanTheme.amber).opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(file.fileName)
+                        .font(.headline)
+                        .foregroundStyle(EzcanTheme.ink)
+                        .lineLimit(1)
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
+                        .font(.caption)
+                        .foregroundStyle(EzcanTheme.muted)
+                }
+                Spacer()
                 if downloadingID == file.id {
                     ProgressView().tint(EzcanTheme.ink)
                 } else {
-                    Image(systemName: "arrow.down.to.line")
+                    Image(systemName: "arrow.up.forward.app")
                         .font(.headline)
                 }
             }
-            .foregroundStyle(EzcanTheme.ink)
-            .frame(width: 42, height: 42)
-            .background(EzcanTheme.greenSoft, in: Circle())
-            .overlay { Circle().stroke(EzcanTheme.green.opacity(0.35), lineWidth: 1) }
-            .disabled(downloadingID != nil)
-            .accessibilityLabel("Download \(file.fileName)")
         }
+        .buttonStyle(.plain)
+        .disabled(downloadingID != nil)
+        .accessibilityLabel("Open \(file.fileName)")
         .padding(16)
         .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: EzcanTheme.shadow, radius: 12, y: 6)
@@ -194,7 +180,7 @@ struct SharedFilesView: View {
         Task {
             do {
                 let url = try await LocalReceiverClient(pairing: pairing).downloadSharedFile(file)
-                receivedFile = ReceivedFile(fileName: file.fileName, url: url)
+                shareItem = ShareItem(url: url)
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -208,7 +194,7 @@ private struct ShareItem: Identifiable {
     let url: URL
 }
 
-private struct ShareSheet: UIViewControllerRepresentable {
+struct ShareSheet: UIViewControllerRepresentable {
     let fileURL: URL
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
@@ -216,10 +202,4 @@ private struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
-}
-
-private struct ReceivedFile: Identifiable {
-    let id = UUID()
-    let fileName: String
-    let url: URL
 }

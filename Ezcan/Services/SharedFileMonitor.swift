@@ -20,7 +20,7 @@ final class SharedFileMonitor: ObservableObject {
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.poll(pairing: pairing)
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }
