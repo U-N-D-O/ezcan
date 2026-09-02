@@ -38,6 +38,7 @@ SEQUENTIAL_ARCHIVE_DIGITS = "0123456789"
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
 MAX_VIDEO_BYTES = 300 * 1024 * 1024
 MAX_SHARED_FILE_BYTES = 1024 * 1024 * 1024
+CURRENT_SCHEMA_VERSION = 3
 SUPPORTED_LANGUAGES = {"japanese", "english"}
 SUPPORTED_CONDITIONS = {"near_mint", "excellent", "very_good", "good", "played", "poor", "graded"}
 SUPPORTED_GRADING_COMPANIES = {"none", "psa", "bgs", "cgc", "other"}
@@ -166,9 +167,37 @@ class Store:
         return connection
 
     def _initialize_database(self) -> None:
+        existing_database = self.database_path.is_file() and self.database_path.stat().st_size > 0
+        needs_backup = False
+        if existing_database:
+            with sqlite3.connect(self.database_path) as probe:
+                tables = {
+                    row[0]
+                    for row in probe.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+                }
+                columns = {row[1] for row in probe.execute("PRAGMA table_info(cards)")}
+                intake_columns = {row[1] for row in probe.execute("PRAGMA table_info(intakes)")}
+                version_row = (
+                    probe.execute("SELECT value FROM schema_meta WHERE key = 'schema_version'").fetchone()
+                    if "schema_meta" in tables
+                    else None
+                )
+                schema_version = int(version_row[0]) if version_row else 1
+                if (
+                    schema_version < CURRENT_SCHEMA_VERSION
+                    or not {"grade_company", "grade"}.issubset(columns)
+                    or "details_json" not in intake_columns
+                ):
+                    needs_backup = True
+        if needs_backup:
+            self._backup_database()
         with self.connection() as connection:
             connection.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS schema_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS intakes (
                     intake_id TEXT PRIMARY KEY,
                     temporary_path TEXT NOT NULL,
@@ -177,7 +206,8 @@ class Store:
                     archive_code TEXT UNIQUE,
                     internal_id TEXT,
                     created_at TEXT NOT NULL,
-                    finalized_at TEXT
+                    finalized_at TEXT,
+                    details_json TEXT
                 );
                 CREATE TABLE IF NOT EXISTS media (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,11 +287,120 @@ class Store:
                 );
                 """
             )
+            version_row = connection.execute(
+                "SELECT value FROM schema_meta WHERE key = 'schema_version'"
+            ).fetchone()
+            schema_version = int(version_row[0]) if version_row else 1
             columns = {row[1] for row in connection.execute("PRAGMA table_info(cards)")}
-            if "grade_company" not in columns:
+            if schema_version < 2 and "grade_company" not in columns:
                 connection.execute("ALTER TABLE cards ADD COLUMN grade_company TEXT")
-            if "grade" not in columns:
+            if schema_version < 2 and "grade" not in columns:
                 connection.execute("ALTER TABLE cards ADD COLUMN grade TEXT")
+            intake_columns = {row[1] for row in connection.execute("PRAGMA table_info(intakes)")}
+            if schema_version < 3 and "details_json" not in intake_columns:
+                connection.execute("ALTER TABLE intakes ADD COLUMN details_json TEXT")
+            connection.execute(
+                "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (str(CURRENT_SCHEMA_VERSION),),
+            )
+        self._recover_interrupted_finalizations()
+
+    def _backup_database(self) -> Path:
+        backup_path = self.backups / f"ezcan-before-migration-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.sqlite3"
+        shutil.copy2(self.database_path, backup_path)
+        return backup_path
+
+    def _recover_interrupted_finalizations(self) -> None:
+        recovered_manifests: list[tuple[Path, dict[str, object]]] = []
+        with self.connection() as connection:
+            rows = connection.execute("SELECT * FROM intakes WHERE status = 'finalizing'").fetchall()
+            for intake in rows:
+                archive_code = str(intake["archive_code"] or "")
+                temporary_path = Path(intake["temporary_path"])
+                final_path = self.cards / archive_code
+                if temporary_path.exists() and not final_path.exists():
+                    connection.execute(
+                        "UPDATE intakes SET status = 'uploading' WHERE intake_id = ?",
+                        (intake["intake_id"],),
+                    )
+                    continue
+                if not final_path.exists():
+                    connection.execute(
+                        "UPDATE intakes SET status = 'recovery_required' WHERE intake_id = ?",
+                        (intake["intake_id"],),
+                    )
+                    continue
+                existing_card = connection.execute(
+                    "SELECT internal_id FROM cards WHERE archive_code = ?", (archive_code,)
+                ).fetchone()
+                if existing_card is not None:
+                    connection.execute(
+                        "UPDATE intakes SET status = 'finalized', finalized_at = COALESCE(finalized_at, ?) WHERE intake_id = ?",
+                        (utc_now(), intake["intake_id"]),
+                    )
+                    continue
+                try:
+                    stored_details = json.loads(str(intake["details_json"] or "{}"))
+                    card_details = validate_card_details(stored_details)
+                except (TypeError, json.JSONDecodeError, HTTPException):
+                    card_details = validate_card_details({})
+                internal_id = str(intake["internal_id"] or uuid.uuid4())
+                media = connection.execute(
+                    "SELECT * FROM media WHERE intake_id = ? ORDER BY id", (intake["intake_id"],)
+                ).fetchall()
+                manifest_media = []
+                for item in media:
+                    new_path = final_path / "original" / item["file_name"]
+                    connection.execute(
+                        "UPDATE media SET file_path = ? WHERE id = ?",
+                        (str(new_path), item["id"]),
+                    )
+                    manifest_media.append(
+                        {
+                            "fileName": item["file_name"],
+                            "type": item["media_type"],
+                            "sha256": item["file_hash"],
+                            "size": item["file_size"],
+                        }
+                    )
+                now = utc_now()
+                connection.execute(
+                    "UPDATE intakes SET status = 'finalized', internal_id = ?, finalized_at = ? WHERE intake_id = ?",
+                    (internal_id, now, intake["intake_id"]),
+                )
+                connection.execute(
+                    "INSERT INTO cards (internal_id, archive_code, folder_path, status, created_at, updated_at, language, condition, grade_company, grade, authenticity_status, notes) VALUES (?, ?, ?, 'received', ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        internal_id,
+                        archive_code,
+                        str(final_path),
+                        now,
+                        now,
+                        card_details["language"],
+                        card_details["condition"],
+                        card_details["gradeCompany"],
+                        card_details["grade"],
+                        card_details["authenticityStatus"],
+                        intake["note"],
+                    ),
+                )
+                recovered_manifests.append(
+                    (
+                        final_path,
+                        {
+                            "archiveCode": archive_code,
+                            "internalId": internal_id,
+                            "intakeId": intake["intake_id"],
+                            "status": "received",
+                            "createdAt": intake["created_at"],
+                            "listingDetails": card_details,
+                            "media": manifest_media,
+                        },
+                    )
+                )
+        for final_path, manifest in recovered_manifests:
+            (final_path / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     def create_intake(self, note: str | None) -> tuple[str, Path, str]:
         intake_id = str(uuid.uuid4())
@@ -270,7 +409,7 @@ class Store:
         archive_code = self.new_archive_code()
         with self.connection() as connection:
             connection.execute(
-                "INSERT INTO intakes VALUES (?, ?, ?, ?, ?, NULL, ?, NULL)",
+                "INSERT INTO intakes (intake_id, temporary_path, note, status, archive_code, internal_id, created_at, finalized_at, details_json) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, NULL)",
                 (intake_id, str(temporary_path), note, "uploading", archive_code, utc_now()),
             )
         return intake_id, temporary_path, archive_code
@@ -336,6 +475,11 @@ class Store:
         final_path = self.cards / archive_code
         if final_path.exists():
             raise HTTPException(status_code=409, detail="Archive folder already exists")
+        with self.connection() as connection:
+            connection.execute(
+                "UPDATE intakes SET status = 'finalizing', archive_code = ?, internal_id = ?, details_json = ? WHERE intake_id = ?",
+                (archive_code, internal_id, json.dumps(card_details), intake_id),
+            )
         (temporary_path / "generated").mkdir(exist_ok=True)
         (temporary_path / "screenshots").mkdir(exist_ok=True)
         temporary_path.rename(final_path)
@@ -569,6 +713,51 @@ class Store:
                 "SELECT * FROM listings WHERE archive_code = ? ORDER BY created_at DESC LIMIT 1",
                 (archive_code,),
             ).fetchone()
+
+    def update_listing_draft(self, archive_code: str, title: str, description: str) -> Path:
+        listing = self.latest_listing_draft(archive_code)
+        if listing is None:
+            raise ValueError("Create a local listing draft first")
+        title = title.strip()
+        description = description.strip()
+        if not title or not description:
+            raise ValueError("Draft title and description are required")
+        draft_path = Path(listing["draft_path"])
+        try:
+            draft = json.loads(draft_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("The local draft file could not be read") from error
+        draft["title"] = title
+        draft["description"] = description
+        draft["reviewStatus"] = "reviewed"
+        draft["publishing"] = {"published": False, "sellerCredentialsUsed": False}
+        draft_path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
+        with self.connection() as connection:
+            connection.execute(
+                "UPDATE listings SET status = 'reviewed' WHERE listing_id = ?",
+                (listing["listing_id"],),
+            )
+        return draft_path
+
+    def set_listing_status(self, archive_code: str, status: str) -> None:
+        if status not in {"draft", "reviewed", "approved", "rejected"}:
+            raise ValueError("Unsupported local draft status")
+        listing = self.latest_listing_draft(archive_code)
+        if listing is None:
+            raise ValueError("Create a local listing draft first")
+        draft_path = Path(listing["draft_path"])
+        try:
+            draft = json.loads(draft_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("The local draft file could not be read") from error
+        draft["reviewStatus"] = status
+        draft["publishing"] = {"published": False, "sellerCredentialsUsed": False}
+        draft_path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
+        with self.connection() as connection:
+            connection.execute(
+                "UPDATE listings SET status = ? WHERE listing_id = ?",
+                (status, listing["listing_id"]),
+            )
 
     def confirm_card_identity(self, archive_code: str, identity: dict[str, object]) -> None:
         card_name = str(identity.get("card_name", "")).strip()
@@ -1175,7 +1364,8 @@ class DesktopWindow:
         self.rounded_button(actions, "SEARCH EBAY", self.search_selected_card, 142, self.green).pack(fill="x", pady=(0, 8))
         self.rounded_button(actions, "ADD MATCH", self.record_selected_candidate, 142, self.amber, foreground=self.text).pack(fill="x", pady=(0, 8))
         self.rounded_button(actions, "REVIEW IDENTITY", self.review_selected_matches, 142, self.cyan, foreground=self.text).pack(fill="x", pady=(0, 8))
-        self.rounded_button(actions, "MAKE DRAFT", self.create_draft_for_selected_card, 142, self.blue).pack(fill="x")
+        self.rounded_button(actions, "MAKE DRAFT", self.create_draft_for_selected_card, 142, self.blue).pack(fill="x", pady=(0, 8))
+        self.rounded_button(actions, "REVIEW DRAFT", self.review_draft_for_selected_card, 142, self.magenta).pack(fill="x")
         return frame
 
     def build_pairing_panel(self, parent: tk.Misc) -> tk.Frame:
@@ -1358,7 +1548,7 @@ class DesktopWindow:
         if state == "searching":
             return "Add match"
         if state == "identified":
-            return "Make draft"
+            return "Review draft" if self.store.latest_listing_draft(str(card["archive_code"])) else "Make draft"
         return state.replace("_", " ").title()
 
     def on_card_selected(self, _event: tk.Event | None = None) -> None:
@@ -1643,6 +1833,84 @@ class DesktopWindow:
             return
         self.draft_var.set(f"{archive_code}: draft saved")
         messagebox.showinfo("Listing Draft", f"Draft saved locally at:\n\n{draft_path}\n\nNothing was published to eBay.")
+
+    def review_draft_for_selected_card(self) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("Review Listing Draft", "Select an archived card first.")
+            return
+        archive_code = str(selected[0])
+        listing = self.store.latest_listing_draft(archive_code)
+        if listing is None:
+            messagebox.showinfo("Review Listing Draft", "Create a local listing draft first.")
+            return
+        try:
+            draft = json.loads(Path(listing["draft_path"]).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            messagebox.showerror("Review Listing Draft", f"Could not read the local draft.\n\n{error}")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Review Listing Draft - {archive_code}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("760x640")
+        dialog.minsize(640, 520)
+        body = tk.Frame(dialog, bg=self.panel, padx=24, pady=20)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text=f"LOCAL DRAFT  //  {archive_code}", bg=self.panel, fg=self.magenta, font=("Consolas", 11, "bold")).pack(anchor="w")
+        status_var = tk.StringVar(value=f"Review status: {listing['status']}  |  Never published")
+        tk.Label(body, textvariable=status_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(anchor="w", pady=(5, 16))
+        tk.Label(body, text="TITLE", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w")
+        title_var = tk.StringVar(value=str(draft.get("title", "")))
+        tk.Entry(body, textvariable=title_var, width=80).pack(fill="x", pady=(4, 14))
+        tk.Label(body, text="DESCRIPTION", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w")
+        description = tk.Text(body, height=12, width=80, wrap="word")
+        description.pack(fill="both", expand=True, pady=(4, 14))
+        description.insert("1.0", str(draft.get("description", "")))
+        note = tk.Label(body, text="This is a local review record. Ezcan has no publish action in this release.", bg=self.panel, fg=self.cyan, font=("Segoe UI", 9), wraplength=700, justify="left")
+        note.pack(anchor="w", pady=(0, 16))
+
+        buttons = tk.Frame(body, bg=self.panel)
+        buttons.pack(fill="x")
+
+        def save_review() -> None:
+            try:
+                self.store.update_listing_draft(archive_code, title_var.get(), description.get("1.0", "end"))
+            except ValueError as error:
+                messagebox.showerror("Review Listing Draft", str(error), parent=dialog)
+                return
+            status_var.set("Review status: reviewed  |  Never published")
+            self.draft_var.set(f"{archive_code}: draft reviewed")
+            self.refresh()
+
+        def set_status(status: str) -> None:
+            try:
+                self.store.set_listing_status(archive_code, status)
+            except ValueError as error:
+                messagebox.showerror("Review Listing Draft", str(error), parent=dialog)
+                return
+            status_var.set(f"Review status: {status}  |  Never published")
+            self.draft_var.set(f"{archive_code}: draft {status}")
+            self.refresh()
+
+        def regenerate() -> None:
+            try:
+                self.store.create_listing_draft(archive_code)
+            except (OSError, ValueError) as error:
+                messagebox.showerror("Review Listing Draft", f"Could not regenerate the local draft.\n\n{error}", parent=dialog)
+                return
+            dialog.destroy()
+            self.draft_var.set(f"{archive_code}: draft regenerated")
+            self.refresh()
+
+        tk.Button(buttons, text="SAVE REVIEW", command=save_review).pack(side="left")
+        tk.Button(buttons, text="APPROVE LOCALLY", command=lambda: set_status("approved")).pack(side="left", padx=(8, 0))
+        tk.Button(buttons, text="REJECT", command=lambda: set_status("rejected")).pack(side="left", padx=(8, 0))
+        tk.Button(buttons, text="REGENERATE", command=regenerate).pack(side="left", padx=(8, 0))
+        tk.Button(buttons, text="CLOSE", command=dialog.destroy).pack(side="right")
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.focus_force()
 
     def copy_text(self, value: str) -> None:
         self.root.clipboard_clear()

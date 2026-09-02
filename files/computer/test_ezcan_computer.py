@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sqlite3
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -7,7 +8,7 @@ from PIL import Image
 
 from ebay import open_picture_search
 from ebay_account import EbayAccountManager
-from ezcan_computer import create_app, default_data_root, increment_archive_code, program_directory
+from ezcan_computer import Store, create_app, default_data_root, increment_archive_code, program_directory
 from image_processor import prepare_search_image
 from pricing import recommend_price
 
@@ -35,6 +36,72 @@ def test_ebay_account_profile_stores_state_without_credentials(tmp_path: Path) -
 
 def test_default_archive_is_next_to_program() -> None:
     assert default_data_root() == program_directory() / "Archive"
+
+
+def test_legacy_database_is_backed_up_before_schema_upgrade(tmp_path: Path) -> None:
+    root = tmp_path / "archive"
+    root.mkdir()
+    database_path = root / "ezcan.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "CREATE TABLE cards (internal_id TEXT PRIMARY KEY, archive_code TEXT NOT NULL UNIQUE, "
+            "folder_path TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+
+    Store(root)
+
+    with sqlite3.connect(database_path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(cards)")}
+        version = connection.execute(
+            "SELECT value FROM schema_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+    assert {"grade_company", "grade"}.issubset(columns)
+    intake_columns = {row[1] for row in connection.execute("PRAGMA table_info(intakes)")}
+    assert "details_json" in intake_columns
+    assert version == "3"
+    assert len(list((root / "Backups").glob("ezcan-before-migration-*.sqlite3"))) == 1
+
+
+def test_interrupted_finalization_rebuilds_moved_card(tmp_path: Path) -> None:
+    root = tmp_path / "archive"
+    store = Store(root)
+    intake_id, temporary_path, archive_code = store.create_intake(None)
+    image_path = temporary_path / "original" / "front.jpg"
+    image_path.write_bytes(b"recovery-card")
+    store.add_media(intake_id, "front.jpg", image_path, "image", hashlib.sha256(b"recovery-card").hexdigest(), 13)
+    internal_id = "recovery-internal-id"
+    details = {"language": "english", "condition": "excellent", "gradeCompany": "none", "grade": ""}
+    with store.connection() as connection:
+        connection.execute(
+            "UPDATE intakes SET status = 'finalizing', internal_id = ?, details_json = ? WHERE intake_id = ?",
+            (internal_id, json.dumps(details), intake_id),
+        )
+    final_path = store.cards / archive_code
+    temporary_path.rename(final_path)
+
+    recovered = Store(root)
+
+    intake = recovered.intake(intake_id)
+    card = recovered.card_by_archive_code(archive_code)
+    assert intake["status"] == "finalized"
+    assert card["internal_id"] == internal_id
+    assert card["language"] == "english"
+    assert (final_path / "manifest.json").is_file()
+
+
+def test_interrupted_finalization_before_move_returns_to_uploading(tmp_path: Path) -> None:
+    root = tmp_path / "archive"
+    store = Store(root)
+    intake_id, _temporary_path, _archive_code = store.create_intake(None)
+    with store.connection() as connection:
+        connection.execute(
+            "UPDATE intakes SET status = 'finalizing', internal_id = ?, details_json = ? WHERE intake_id = ?",
+            ("not-moved", "{}", intake_id),
+        )
+
+    recovered = Store(root)
+
+    assert recovered.intake(intake_id)["status"] == "uploading"
 
 
 def test_archive_codes_increment_in_storage_order() -> None:
@@ -481,6 +548,23 @@ def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path)
     assert str(Path(card["folder_path"]) / "original" / "front.jpg") in draft["imagePaths"]
     assert listing["status"] == "draft"
     assert Path(listing["draft_path"]) == draft_path
+
+    app.state.store.update_listing_draft(archive_code, "Reviewed Charizard", "A reviewed local description.")
+    reviewed = json.loads(draft_path.read_text(encoding="utf-8"))
+    reviewed_listing = app.state.store.latest_listing_draft(archive_code)
+    assert reviewed["title"] == "Reviewed Charizard"
+    assert reviewed["reviewStatus"] == "reviewed"
+    assert reviewed["publishing"] == {"published": False, "sellerCredentialsUsed": False}
+    assert reviewed_listing["status"] == "reviewed"
+
+    app.state.store.set_listing_status(archive_code, "approved")
+    approved = json.loads(draft_path.read_text(encoding="utf-8"))
+    assert app.state.store.latest_listing_draft(archive_code)["status"] == "approved"
+    assert approved["reviewStatus"] == "approved"
+    assert approved["publishing"]["published"] is False
+
+    app.state.store.set_listing_status(archive_code, "rejected")
+    assert app.state.store.latest_listing_draft(archive_code)["status"] == "rejected"
 
 
 def test_recommend_price_separates_sold_active_and_owner_shipping() -> None:
