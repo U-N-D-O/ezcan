@@ -616,7 +616,6 @@ class DesktopWindow:
         command,
         width: int,
         color: str,
-        hover_color: str,
         foreground: str = "white",
     ) -> tk.Canvas:
         height = 52
@@ -629,7 +628,6 @@ class DesktopWindow:
             highlightthickness=0,
             cursor="hand2",
         )
-        state = {"hover": False, "lift": 0.0, "shine": -130, "motion_job": None, "shine_job": None}
 
         def rounded_shape(left: float, top: float, right: float, bottom: float, fill: str, outline: str = "") -> None:
             radius = (bottom - top) / 2
@@ -638,64 +636,18 @@ class DesktopWindow:
             button.create_oval(left, top, left + radius * 2, bottom, fill=fill, outline=outline)
             button.create_oval(right - radius * 2, top, right, bottom, fill=fill, outline=outline)
 
-        def paint(fill: str, lift: float) -> None:
+        def paint() -> None:
             button.delete("all")
-            inset = 3 - (2 * lift)
-            top = 7 - (3 * lift)
-            bottom = height - 5 - (3 * lift)
-            rounded_shape(inset + 2, top + 5, width - inset + 2, bottom + 5, "#b7c4d0")
-            rounded_shape(inset, top, width - inset, bottom, "#d7e5f0", "#ffffff")
-            rounded_shape(inset + 3, top + 3, width - inset - 3, bottom - 3, fill)
-            shine = button.create_polygon(
-                state["shine"], top + 2,
-                state["shine"] + 22, top + 2,
-                state["shine"] + 70, bottom - 2,
-                state["shine"] + 48, bottom - 2,
-                fill="#ffffff",
-                outline="",
-                stipple="gray50",
-                tags="shine",
-            )
-            button.create_text(width // 2 - 7, height // 2 - (2 * lift), text=text, fill=foreground, font=("Segoe UI", 10, "bold"), tags="label")
-            button.tag_lower(shine, "label")
-            button.create_text(width - 22 + (4 * lift), height // 2 - (2 * lift), text="→", fill=foreground, font=("Segoe UI", 16, "bold"), tags="icon")
+            rounded_shape(2, 6, width - 2, height - 1, "#b8c4d0")
+            rounded_shape(0, 2, width - 4, height - 5, "#654358", "#654358")
+            rounded_shape(3, 5, width - 7, height - 8, "#170928")
+            rounded_shape(5, 7, width - 9, height - 10, "#1d0d33")
+            rounded_shape(5, 7, width - 9, height // 2, "#654358")
+            rounded_shape(5, height // 2 - 1, width - 9, height - 10, "#170928")
+            button.create_text(width // 2 - 7, height // 2 - 2, text=text, fill=foreground, font=("Segoe UI", 10, "bold"), tags="label")
+            button.create_text(width - 22, height // 2 - 2, text="→", fill=foreground, font=("Segoe UI", 16, "bold"), tags="icon")
 
-        def animate(target: float) -> None:
-            current = state["lift"]
-            if abs(current - target) < 0.02:
-                state["lift"] = target
-                paint(hover_color if state["hover"] else color, target)
-                return
-            state["lift"] = current + (target - current) * 0.45
-            paint(hover_color if state["hover"] else color, state["lift"])
-            state["motion_job"] = button.after(16, lambda: animate(target))
-
-        def shine_pass() -> None:
-            if not state["hover"]:
-                state["shine"] = -130
-                return
-            state["shine"] += 9
-            if state["shine"] > width + 40:
-                state["shine"] = -130
-            paint(hover_color, state["lift"])
-            state["shine_job"] = button.after(32, shine_pass)
-
-        def enter(_event: tk.Event) -> None:
-            state["hover"] = True
-            animate(1.0)
-            if state["shine_job"] is None:
-                shine_pass()
-
-        def leave(_event: tk.Event) -> None:
-            state["hover"] = False
-            if state["shine_job"] is not None:
-                button.after_cancel(state["shine_job"])
-                state["shine_job"] = None
-            animate(0.0)
-
-        paint(color, 0.0)
-        button.bind("<Enter>", enter)
-        button.bind("<Leave>", leave)
+        paint()
         button.bind("<Button-1>", lambda _event: command())
         return button
 
@@ -746,7 +698,7 @@ class DesktopWindow:
         address_label.pack(anchor="w", pady=(0, 5))
         address_label.bind("<Button-1>", lambda _event: self.copy_text(self.address))
         tk.Label(content, text="Tap the address to copy it", bg=self.background, fg=self.muted, font=("Segoe UI", 8)).pack(anchor="w")
-        self.rounded_button(content, "COPY ADDRESS", lambda: self.copy_text(self.address), 172, self.blue, "#178ed0").pack(anchor="w", pady=(16, 0))
+        self.rounded_button(content, "COPY ADDRESS", lambda: self.copy_text(self.address), 172, self.blue).pack(anchor="w", pady=(16, 0))
         return frame
 
     def build_action_strip(self, parent: tk.Misc) -> tk.Frame:
@@ -765,7 +717,7 @@ class DesktopWindow:
         details.pack(side="left", fill="x", expand=True)
         tk.Label(details, text=title, bg=self.background, fg=accent, font=("Consolas", 8, "bold")).pack(anchor="w")
         tk.Label(details, textvariable=value, bg=self.background, fg=self.text, font=("Segoe UI", 9), anchor="w").pack(anchor="w", pady=(4, 0))
-        self.rounded_button(line, button_text, command, 112, accent, accent, foreground="#ffffff").pack(side="right", pady=1)
+        self.rounded_button(line, button_text, command, 112, accent, foreground="#ffffff").pack(side="right", pady=1)
 
     def action_tile(self, parent: tk.Misc, column: int, title: str, value: tk.StringVar, button_text: str, command, accent: str, icon: str) -> None:
         frame, content = self.raised_surface(parent, accent)
@@ -775,7 +727,7 @@ class DesktopWindow:
         details.pack(side="left", fill="x", expand=True, padx=8, pady=10)
         tk.Label(details, text=title, bg=self.panel, fg=accent, font=("Consolas", 7, "bold")).pack(anchor="w")
         tk.Label(details, textvariable=value, bg=self.panel, fg=self.text, font=("Segoe UI", 9), anchor="w").pack(anchor="w", pady=(3, 0))
-        self.rounded_button(content, button_text, command, 126, accent, accent, foreground=self.text).pack(side="right", padx=14, pady=10)
+        self.rounded_button(content, button_text, command, 126, accent, foreground=self.text).pack(side="right", padx=14, pady=10)
 
     def build_archive_surface(self, parent: tk.Misc) -> tk.Frame:
         frame = tk.Frame(parent, bg=self.background)
@@ -864,7 +816,6 @@ class DesktopWindow:
             lambda: self.copy_text(self.address),
             142,
             self.cyan,
-            "#71dfe3",
         ).pack(anchor="w", padx=24, pady=(0, 24))
         return frame
 
@@ -920,7 +871,7 @@ class DesktopWindow:
         left.pack(side="left", fill="x", expand=True, padx=18, pady=13)
         tk.Label(left, text="ARCHIVE LOCATION", bg=self.panel, fg=self.cyan, font=("Consolas", 8)).pack(anchor="w")
         tk.Label(left, textvariable=self.archive_var, bg=self.panel, fg=self.text, font=("Consolas", 9)).pack(anchor="w", pady=(3, 0))
-        self.rounded_button(inner, "OPEN ARCHIVE", self.open_archive, 132, self.blue, "#71a9f4").pack(
+        self.rounded_button(inner, "OPEN ARCHIVE", self.open_archive, 132, self.blue).pack(
             side="right", padx=14, pady=11
         )
         return frame
@@ -934,7 +885,7 @@ class DesktopWindow:
         left.pack(side="left", fill="x", expand=True, padx=18, pady=13)
         tk.Label(left, text="SEND TO IPHONE", bg=self.panel, fg=self.magenta, font=("Consolas", 8)).pack(anchor="w")
         tk.Label(left, textvariable=self.transfer_var, bg=self.panel, fg=self.text, font=("Segoe UI", 9)).pack(anchor="w", pady=(3, 0))
-        self.rounded_button(inner, "CHOOSE FILE", self.choose_file_for_iphone, 126, self.magenta, "#ef7da0").pack(
+        self.rounded_button(inner, "CHOOSE FILE", self.choose_file_for_iphone, 126, self.magenta).pack(
             side="right", padx=14, pady=11
         )
         return frame
