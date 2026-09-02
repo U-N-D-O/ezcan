@@ -499,9 +499,11 @@ class DesktopWindow:
     green = "#32c77b"
     amber = "#eab849"
 
-    def __init__(self, application: FastAPI, server: uvicorn.Server):
+    def __init__(self, application: FastAPI, server: uvicorn.Server, server_thread: threading.Thread | None = None):
         self.application = application
         self.server = server
+        self.server_thread = server_thread
+        self.closing = False
         self.store: Store = application.state.store
         self.root = tk.Tk()
         self.root.title("Ezcan Card Workbench")
@@ -1015,11 +1017,20 @@ class DesktopWindow:
             messagebox.showerror("Ezcan Archive", f"Could not open the archive folder.\n\n{error}")
 
     def close(self) -> None:
+        if self.closing:
+            return
+        self.closing = True
         self.server.should_exit = True
-        self.root.destroy()
+        self.root.quit()
 
     def run(self) -> None:
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            self.server.should_exit = True
+            self.root.destroy()
+            if self.server_thread and self.server_thread.is_alive():
+                self.server_thread.join(timeout=3)
 
 
 def start() -> None:
@@ -1033,8 +1044,14 @@ def start() -> None:
         log_config=None,
     )
     server = uvicorn.Server(config)
-    threading.Thread(target=server.run, daemon=True, name="ezcan-api").start()
-    DesktopWindow(app, server).run()
+    server_thread = threading.Thread(target=server.run, daemon=True, name="ezcan-api")
+    server_thread.start()
+    try:
+        DesktopWindow(app, server, server_thread).run()
+    finally:
+        server.should_exit = True
+        if server_thread.is_alive():
+            server_thread.join(timeout=3)
 
 if __name__ == "__main__":
     start()
