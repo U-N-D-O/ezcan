@@ -485,14 +485,19 @@ def create_app(data_root: Path | None = None) -> FastAPI:
 
 
 class DesktopWindow:
-    background = "#0b1020"
-    panel = "#121a2b"
-    panel_alt = "#18233a"
-    border = "#263653"
-    text = "#f4f7fb"
-    muted = "#91a0b9"
-    blue = "#4f8cff"
-    green = "#43d39e"
+    background = "#050d1b"
+    panel = "#122238"
+    panel_alt = "#1a3049"
+    panel_deep = "#091523"
+    border = "#34536d"
+    border_bright = "#55f4ed"
+    text = "#f4f8ff"
+    muted = "#8498b4"
+    cyan = "#54f4ed"
+    blue = "#5b98ff"
+    magenta = "#ed4d78"
+    green = "#62f59a"
+    amber = "#f5c45b"
 
     def __init__(self, application: FastAPI, server: uvicorn.Server):
         self.application = application
@@ -500,13 +505,13 @@ class DesktopWindow:
         self.store: Store = application.state.store
         self.root = tk.Tk()
         self.root.title("Ezcan Computer")
-        self.root.geometry("1180x780")
-        self.root.minsize(940, 650)
+        self.root.geometry("1220x820")
+        self.root.minsize(980, 680)
         self.root.configure(bg=self.background)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.address = f"http://{computer_ip()}:{application.state.port}"
         self.address_var = tk.StringVar(value=self.address)
-        self.connection_var = tk.StringVar(value="ONLINE  •  PRIVATE NETWORK")
+        self.connection_var = tk.StringVar(value="ONLINE - PRIVATE NETWORK")
         self.archive_var = tk.StringVar(value=str(self.store.root))
         self.transfer_var = tk.StringVar(value="No files queued")
         self.cards_var = tk.StringVar(value="0")
@@ -516,6 +521,7 @@ class DesktopWindow:
         self.qr_photo: tk.PhotoImage | None = None
         self.tree: ttk.Treeview
         self.build_styles()
+        self.build_background()
         self.build_layout()
         self.refresh()
 
@@ -524,25 +530,128 @@ class DesktopWindow:
         style.theme_use("clam")
         style.configure(
             "Ezcan.Treeview",
-            background=self.panel,
-            fieldbackground=self.panel,
+            background=self.panel_deep,
+            fieldbackground=self.panel_deep,
             foreground=self.text,
             borderwidth=0,
-            rowheight=42,
-            font=("Segoe UI", 10),
+            rowheight=38,
+            font=("Consolas", 9),
         )
         style.configure(
             "Ezcan.Treeview.Heading",
-            background=self.panel_alt,
-            foreground=self.muted,
+            background="#102039",
+            foreground=self.cyan,
             borderwidth=0,
-            font=("Segoe UI Semibold", 9),
+            font=("Consolas", 8),
         )
-        style.map("Ezcan.Treeview", background=[("selected", "#25477d")], foreground=[("selected", self.text)])
+        style.map("Ezcan.Treeview", background=[("selected", "#164d69")], foreground=[("selected", self.text)])
+        style.configure(
+            "Ezcan.Vertical.TScrollbar",
+            background="#238f99",
+            darkcolor="#102d40",
+            lightcolor="#238f99",
+            troughcolor="#07101d",
+            bordercolor="#07101d",
+            arrowcolor=self.cyan,
+            relief="flat",
+            borderwidth=0,
+        )
+
+    def build_background(self) -> None:
+        self.background_canvas = tk.Canvas(
+            self.root,
+            bg=self.background,
+            bd=0,
+            highlightthickness=0,
+        )
+        self.background_canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self.background_canvas.bind("<Configure>", self.draw_background)
+
+    def draw_background(self, event: tk.Event) -> None:
+        canvas = event.widget
+        canvas.delete("grid")
+        width = max(1, event.width)
+        height = max(1, event.height)
+        for x in range(24, width, 42):
+            canvas.create_line(x, 0, x, height, fill="#0d2034", tags="grid")
+        for y in range(24, height, 42):
+            canvas.create_line(0, y, width, y, fill="#0d2034", tags="grid")
+
+        points = [
+            (0.03, 0.16), (0.14, 0.08), (0.28, 0.14), (0.42, 0.06),
+            (0.56, 0.16), (0.72, 0.07), (0.88, 0.17), (0.98, 0.09),
+            (0.04, 0.78), (0.18, 0.9), (0.34, 0.82), (0.52, 0.94),
+            (0.7, 0.84), (0.86, 0.93), (0.98, 0.76),
+        ]
+        coordinates = [(int(width * x), int(height * y)) for x, y in points]
+        for first, second in zip(coordinates, coordinates[1:]):
+            canvas.create_line(*first, *second, fill="#173a52", width=1, tags="grid")
+        for x, y in coordinates:
+            canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill="#2daab1", outline="#58f4ed", tags="grid")
+        for x, y in coordinates[::2]:
+            canvas.create_line(x, y, x + 26, y, fill="#23526b", tags="grid")
+            canvas.create_line(x + 26, y, x + 26, y + 18, fill="#23526b", tags="grid")
+        canvas.create_line(0, 1, width, 1, fill="#3aa6ae", tags="grid")
+
+    def panel_texture(self, parent: tk.Misc, accent: str) -> tk.Canvas:
+        texture = tk.Canvas(parent, bg=self.panel, bd=0, highlightthickness=0)
+        texture.place(relx=0, rely=0, relwidth=1, relheight=1)
+        texture.create_line(12, 14, 84, 14, fill=accent, width=2)
+        texture.create_line(12, 18, 54, 18, fill="#24465c")
+        texture.create_line(14, 18, 14, 66, fill="#17384d")
+        texture.create_line(14, 66, 78, 66, fill="#17384d")
+        texture.create_oval(10, 62, 18, 70, fill=accent, outline="")
+        texture.create_line(0, 78, 62, 78, fill="#17384d")
+        texture.create_line(62, 78, 82, 58, fill="#17384d")
+        texture.create_line(62, 78, 62, 112, fill="#17384d")
+        texture.create_oval(58, 108, 66, 116, fill="#2b8792", outline="")
+        texture.tk.call("lower", texture._w)
+        return texture
+
+    def rounded_button(
+        self,
+        parent: tk.Misc,
+        text: str,
+        command,
+        width: int,
+        color: str,
+        hover_color: str,
+        foreground: str = "white",
+    ) -> tk.Canvas:
+        button = tk.Canvas(
+            parent,
+            width=width,
+            height=38,
+            bg=parent.cget("bg"),
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+
+        def paint(fill: str) -> None:
+            button.delete("all")
+            radius = 18
+            button.create_rectangle(radius, 1, width - radius, 37, fill="#07111f", outline="#07111f")
+            button.create_rectangle(2, radius, width - 2, 38 - radius, fill="#07111f", outline="#07111f")
+            button.create_oval(2, 1, radius * 2 + 2, 37, fill="#07111f", outline="#07111f")
+            button.create_oval(width - radius * 2 - 2, 1, width - 2, 37, fill="#07111f", outline="#07111f")
+            button.create_rectangle(radius, 3, width - radius, 34, fill=fill, outline=fill)
+            button.create_rectangle(4, radius, width - 4, 34 - radius, fill=fill, outline=fill)
+            button.create_oval(4, 3, radius * 2, 34, fill=fill, outline=fill)
+            button.create_oval(width - radius * 2, 3, width - 4, 34, fill=fill, outline=fill)
+            button.create_line(radius + 4, 4, width - radius - 4, 4, fill="#ffffff", stipple="gray50")
+            button.create_line(radius + 4, 34, width - radius - 4, 34, fill="#06101c")
+            button.create_text(width // 2, 20, text=text, fill=foreground, font=("Segoe UI Semibold", 9))
+
+        paint(color)
+        button.bind("<Enter>", lambda _event: paint(hover_color))
+        button.bind("<Leave>", lambda _event: paint(color))
+        button.bind("<Button-1>", lambda _event: command())
+        return button
 
     def build_layout(self) -> None:
         header = tk.Frame(self.root, bg=self.background)
-        header.pack(fill="x", padx=34, pady=(28, 18))
+        header.pack(fill="x", padx=38, pady=(30, 20))
 
         brand = tk.Frame(header, bg=self.background)
         brand.pack(side="left")
@@ -551,29 +660,35 @@ class DesktopWindow:
             text="EZCAN",
             bg=self.background,
             fg=self.text,
-            font=("Segoe UI Black", 27),
+            font=("Segoe UI Black", 29),
         ).pack(anchor="w")
         tk.Label(
             brand,
             text="CARD OPERATIONS CONSOLE",
             bg=self.background,
-            fg=self.blue,
-            font=("Segoe UI Semibold", 9),
+            fg=self.cyan,
+            font=("Consolas", 8),
         ).pack(anchor="w")
 
-        status = tk.Label(
-            header,
+        status_shell = tk.Frame(header, bg=self.green, padx=1, pady=1)
+        status = tk.Frame(status_shell, bg="#0b2b27")
+        status.pack(fill="both", expand=True)
+        status_dot = tk.Canvas(status, width=13, height=13, bg="#0b2b27", highlightthickness=0, bd=0)
+        status_dot.pack(side="left", padx=(12, 6), pady=9)
+        status_dot.create_oval(3, 3, 10, 10, fill=self.green, outline="")
+        tk.Label(
+            status,
             textvariable=self.connection_var,
-            bg="#12382f",
+            bg="#0b2b27",
             fg=self.green,
-            padx=14,
+            padx=12,
             pady=8,
-            font=("Segoe UI Semibold", 9),
-        )
-        status.pack(side="right", anchor="n", pady=5)
+            font=("Consolas", 8),
+        ).pack(side="left")
+        status_shell.pack(side="right", anchor="n", pady=5)
 
         body = tk.Frame(self.root, bg=self.background)
-        body.pack(fill="both", expand=True, padx=34, pady=(0, 24))
+        body.pack(fill="both", expand=True, padx=38, pady=(0, 28))
         body.grid_columnconfigure(0, weight=0, minsize=330)
         body.grid_columnconfigure(1, weight=1)
         body.grid_rowconfigure(0, weight=1)
@@ -589,24 +704,29 @@ class DesktopWindow:
         self.build_cards_table(right).grid(row=3, column=0, sticky="nsew")
 
     def build_pairing_panel(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        frame = tk.Frame(parent, bg="#1a7882", highlightthickness=2, highlightbackground=self.cyan)
+        content = tk.Frame(frame, bg=self.panel)
+        content.pack(fill="both", expand=True, padx=3, pady=3)
+        self.panel_texture(content, self.cyan)
         tk.Label(
-            frame,
+            content,
             text="PAIR DEVICE",
             bg=self.panel,
             fg=self.text,
             font=("Segoe UI Semibold", 13),
         ).pack(anchor="w", padx=24, pady=(24, 3))
         tk.Label(
-            frame,
+            content,
             text="Scan this code in the Ezcan iOS app",
             bg=self.panel,
             fg=self.muted,
             font=("Segoe UI", 10),
         ).pack(anchor="w", padx=24)
 
-        qr_frame = tk.Frame(frame, bg="#ffffff", width=240, height=240)
-        qr_frame.pack(padx=24, pady=22)
+        qr_shell = tk.Frame(content, bg=self.cyan, padx=5, pady=5)
+        qr_shell.pack(padx=24, pady=22)
+        qr_frame = tk.Frame(qr_shell, bg="#ffffff", width=250, height=250)
+        qr_frame.pack()
         qr_frame.pack_propagate(False)
         payload = json.dumps(
             {
@@ -618,44 +738,37 @@ class DesktopWindow:
             },
             separators=(",", ":"),
         )
-        image = pairing_qr_image(payload, target_pixels=208)
+        image = pairing_qr_image(payload, target_pixels=220)
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         self.qr_photo = tk.PhotoImage(data=base64.b64encode(buffer.getvalue()).decode("ascii"))
         tk.Label(qr_frame, image=self.qr_photo, bg="#ffffff").place(relx=0.5, rely=0.5, anchor="center")
 
         tk.Label(
-            frame,
+            content,
             text="COMPUTER ADDRESS",
             bg=self.panel,
             fg=self.muted,
             font=("Segoe UI Semibold", 8),
         ).pack(anchor="w", padx=24)
         address_label = tk.Label(
-            frame,
+            content,
             textvariable=self.address_var,
             bg=self.panel,
             fg=self.text,
-            font=("Consolas", 10),
+            font=("Consolas", 9),
             cursor="hand2",
         )
         address_label.pack(anchor="w", padx=24, pady=(4, 12))
         address_label.bind("<Button-1>", lambda _event: self.copy_text(self.address))
 
-        tk.Button(
-            frame,
-            text="Copy address",
-            command=lambda: self.copy_text(self.address),
-            bg=self.panel_alt,
-            fg=self.text,
-            activebackground=self.border,
-            activeforeground=self.text,
-            relief="flat",
-            borderwidth=0,
-            padx=14,
-            pady=9,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
+        self.rounded_button(
+            content,
+            "COPY ADDRESS",
+            lambda: self.copy_text(self.address),
+            142,
+            "#172b42",
+            "#28516a",
         ).pack(anchor="w", padx=24, pady=(0, 24))
         return frame
 
@@ -663,75 +776,81 @@ class DesktopWindow:
         frame = tk.Frame(parent, bg=self.background)
         for column in range(3):
             frame.grid_columnconfigure(column, weight=1)
-        self.stat_card(frame, "ARCHIVED CARDS", self.cards_var, self.blue, 0)
-        self.stat_card(frame, "ACTIVE INTAKES", self.active_var, "#f2b84b", 1)
-        self.stat_card(frame, "MEDIA RECEIVED", self.media_var, self.green, 2)
+        circuit = tk.Canvas(frame, height=28, bg=self.background, bd=0, highlightthickness=0)
+        circuit.grid(row=0, column=0, columnspan=3, sticky="ew")
+        circuit.bind("<Configure>", self.draw_circuit)
+        self.stat_card(frame, "ARCHIVED CARDS", self.cards_var, self.blue, 0, "01")
+        self.stat_card(frame, "ACTIVE INTAKES", self.active_var, self.amber, 1, "02")
+        self.stat_card(frame, "MEDIA RECEIVED", self.media_var, self.green, 2, "03")
         return frame
 
-    def stat_card(self, parent: tk.Misc, label: str, value: tk.StringVar, accent: str, column: int) -> None:
-        card = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
-        card.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 8, 8 if column < 2 else 0))
-        tk.Frame(card, bg=accent, height=3).pack(fill="x")
-        tk.Label(card, text=label, bg=self.panel, fg=self.muted, font=("Segoe UI Semibold", 8)).pack(
-            anchor="w", padx=16, pady=(15, 3)
-        )
-        tk.Label(card, textvariable=value, bg=self.panel, fg=self.text, font=("Segoe UI Black", 25)).pack(
-            anchor="w", padx=16, pady=(0, 14)
+    def draw_circuit(self, event: tk.Event) -> None:
+        canvas = event.widget
+        canvas.delete("all")
+        width = event.width
+        canvas.create_line(4, 14, max(4, width - 4), 14, fill="#477086", width=1)
+        for position in (width // 6, width // 2, width * 5 // 6):
+            canvas.create_line(position - 22, 14, position - 6, 14, fill=self.cyan, width=2)
+            canvas.create_line(position + 6, 14, position + 22, 14, fill="#477086", width=1)
+            canvas.create_oval(position - 5, 9, position + 5, 19, fill="#0c1f32", outline=self.cyan, width=1)
+            canvas.create_oval(position - 2, 12, position + 2, 16, fill=self.cyan, outline="")
+
+    def stat_card(
+        self,
+        parent: tk.Misc,
+        label: str,
+        value: tk.StringVar,
+        accent: str,
+        column: int,
+        index: str,
+    ) -> None:
+        card = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=accent)
+        card.grid(row=1, column=column, sticky="ew", padx=(0 if column == 0 else 8, 8 if column < 2 else 0))
+        tk.Frame(card, bg=accent, height=4).pack(fill="x")
+        meta = tk.Frame(card, bg=self.panel)
+        meta.pack(fill="x", padx=16, pady=(14, 2))
+        tk.Label(meta, text=label, bg=self.panel, fg=self.muted, font=("Consolas", 8)).pack(side="left")
+        tk.Label(meta, text=f"// {index}", bg=self.panel, fg=accent, font=("Consolas", 8)).pack(side="right")
+        tk.Label(card, textvariable=value, bg=self.panel, fg=self.text, font=("Segoe UI Black", 27)).pack(
+            anchor="w", padx=16, pady=(0, 13)
         )
 
     def build_archive_bar(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
-        left = tk.Frame(frame, bg=self.panel)
+        frame = tk.Frame(parent, bg="#203b55", highlightthickness=2, highlightbackground="#52738b")
+        inner = tk.Frame(frame, bg=self.panel)
+        inner.pack(fill="both", expand=True, padx=4, pady=4)
+        self.panel_texture(inner, self.cyan)
+        left = tk.Frame(inner, bg=self.panel)
         left.pack(side="left", fill="x", expand=True, padx=18, pady=13)
-        tk.Label(left, text="ARCHIVE LOCATION", bg=self.panel, fg=self.muted, font=("Segoe UI Semibold", 8)).pack(anchor="w")
+        tk.Label(left, text="ARCHIVE LOCATION", bg=self.panel, fg=self.cyan, font=("Consolas", 8)).pack(anchor="w")
         tk.Label(left, textvariable=self.archive_var, bg=self.panel, fg=self.text, font=("Consolas", 9)).pack(anchor="w", pady=(3, 0))
-        tk.Button(
-            frame,
-            text="Open Archive",
-            command=self.open_archive,
-            bg=self.blue,
-            fg="white",
-            activebackground="#6ea3ff",
-            activeforeground="white",
-            relief="flat",
-            borderwidth=0,
-            padx=15,
-            pady=9,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        ).pack(side="right", padx=14, pady=12)
+        self.rounded_button(inner, "OPEN ARCHIVE", self.open_archive, 132, self.blue, "#70a5ff").pack(
+            side="right", padx=14, pady=11
+        )
         return frame
 
     def build_transfer_bar(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
-        left = tk.Frame(frame, bg=self.panel)
+        frame = tk.Frame(parent, bg="#203b55", highlightthickness=2, highlightbackground="#52738b")
+        inner = tk.Frame(frame, bg=self.panel)
+        inner.pack(fill="both", expand=True, padx=4, pady=4)
+        self.panel_texture(inner, self.magenta)
+        left = tk.Frame(inner, bg=self.panel)
         left.pack(side="left", fill="x", expand=True, padx=18, pady=13)
-        tk.Label(left, text="SEND TO IPHONE", bg=self.panel, fg=self.muted, font=("Segoe UI Semibold", 8)).pack(anchor="w")
+        tk.Label(left, text="SEND TO IPHONE", bg=self.panel, fg=self.magenta, font=("Consolas", 8)).pack(anchor="w")
         tk.Label(left, textvariable=self.transfer_var, bg=self.panel, fg=self.text, font=("Segoe UI", 9)).pack(anchor="w", pady=(3, 0))
-        tk.Button(
-            frame,
-            text="Choose file",
-            command=self.choose_file_for_iphone,
-            bg="#c95775",
-            fg="white",
-            activebackground="#e27791",
-            activeforeground="white",
-            relief="flat",
-            borderwidth=0,
-            padx=15,
-            pady=9,
-            font=("Segoe UI Semibold", 9),
-            cursor="hand2",
-        ).pack(side="right", padx=14, pady=12)
+        self.rounded_button(inner, "CHOOSE FILE", self.choose_file_for_iphone, 126, "#832c4b", "#b53e63").pack(
+            side="right", padx=14, pady=11
+        )
         return frame
 
     def build_cards_table(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        frame = tk.Frame(parent, bg="#172d44", highlightthickness=1, highlightbackground="#355572")
         heading = tk.Frame(frame, bg=self.panel)
         heading.pack(fill="x", padx=20, pady=(18, 10))
-        tk.Label(heading, text="RECENT ARCHIVE ACTIVITY", bg=self.panel, fg=self.text, font=("Segoe UI Semibold", 13)).pack(side="left")
+        tk.Frame(heading, bg=self.cyan, width=3, height=18).pack(side="left", padx=(0, 9))
+        tk.Label(heading, text="RECENT ARCHIVE ACTIVITY", bg=self.panel, fg=self.cyan, font=("Consolas", 11)).pack(side="left")
         tk.Label(heading, textvariable=self.updated_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(side="right")
-        table_frame = tk.Frame(frame, bg=self.panel)
+        table_frame = tk.Frame(frame, bg=self.panel_deep, highlightthickness=1, highlightbackground="#2b4a62")
         table_frame.pack(fill="both", expand=True, padx=14, pady=(0, 14))
         self.tree = ttk.Treeview(
             table_frame,
@@ -744,7 +863,9 @@ class DesktopWindow:
         for column, title in headings.items():
             self.tree.heading(column, text=title, anchor="w")
             self.tree.column(column, width=widths[column], anchor="w", stretch=column in {"folder", "created"})
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.tag_configure("stripe_even", background="#122238", foreground=self.text)
+        self.tree.tag_configure("stripe_odd", background="#1b2b3e", foreground=self.text)
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview, style="Ezcan.Vertical.TScrollbar")
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -759,12 +880,13 @@ class DesktopWindow:
         self.transfer_var.set(f"{len(shared)} file{'s' if len(shared) != 1 else ''} ready in To iPhone")
         for item in self.tree.get_children():
             self.tree.delete(item)
-        for card in self.store.recent_cards():
+        for index, card in enumerate(self.store.recent_cards()):
             created = str(card["created_at"]).replace("T", " ")[:19]
             self.tree.insert(
                 "",
                 "end",
                 values=(card["archive_code"], str(card["status"]).upper(), card["folder_path"], created),
+                tags=("stripe_even" if index % 2 == 0 else "stripe_odd",),
             )
         self.updated_var.set(f"Updated {datetime.now().strftime('%H:%M:%S')}")
         self.root.after(1500, self.refresh)

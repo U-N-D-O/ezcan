@@ -33,6 +33,7 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
     private let sessionQueue = DispatchQueue(label: "com.undu.ezcan.qr-session")
     private let previewView = UIView()
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var cameraDevice: AVCaptureDevice?
     private var isConfigured = false
     private var didScan = false
 
@@ -182,6 +183,8 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
                 return
             }
             self.isConfigured = true
+            self.cameraDevice = camera
+            self.configureContinuousFocus(on: camera)
             self.session.beginConfiguration()
             self.session.addInput(input)
             self.session.addOutput(output)
@@ -207,6 +210,27 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
     private func updateStatus(_ message: String) {
         DispatchQueue.main.async { [weak self] in
             self?.showCameraMessage(message)
+        }
+    }
+
+    private func configureContinuousFocus(on camera: AVCaptureDevice) {
+        guard camera.isFocusModeSupported(.continuousAutoFocus) else { return }
+        do {
+            try camera.lockForConfiguration()
+            camera.focusMode = .continuousAutoFocus
+            if camera.isFocusPointOfInterestSupported {
+                camera.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
+                camera.isSubjectAreaChangeMonitoringEnabled = true
+            }
+            if camera.isExposureModeSupported(.continuousAutoExposure) {
+                camera.exposureMode = .continuousAutoExposure
+                if camera.isExposurePointOfInterestSupported {
+                    camera.exposurePointOfInterest = CGPoint(x: 0.5, y: 0.5)
+                }
+            }
+            camera.unlockForConfiguration()
+        } catch {
+            updateStatus("Camera focus is unavailable")
         }
     }
 

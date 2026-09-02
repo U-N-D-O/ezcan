@@ -114,21 +114,32 @@ struct CardCaptureFlowView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        GeometryReader { proxy in
+            appHeader(compact: proxy.size.width < 390)
+        }
+        .frame(height: 62)
+    }
+
+    private func appHeader(compact: Bool) -> some View {
+        HStack(spacing: compact ? 7 : 10) {
             Image("ezcan_logo")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 38, height: 38)
+                .frame(width: compact ? 32 : 38, height: compact ? 32 : 38)
             VStack(alignment: .leading, spacing: 2) {
                 Text("EZCAN")
-                    .font(.system(size: 15, weight: .black, design: .rounded))
-                    .tracking(1.4)
-                Text("Card capture")
-                    .font(.caption)
-                    .foregroundStyle(EzcanTheme.muted)
+                    .font(.system(size: compact ? 14 : 15, weight: .black, design: .rounded))
+                    .tracking(compact ? 1.1 : 1.4)
+                if !compact {
+                    Text("Card capture")
+                        .font(.caption)
+                        .foregroundStyle(EzcanTheme.muted)
+                }
             }
             Spacer()
-            EzcanStatusPill(title: "ONLINE")
+            if !compact {
+                EzcanStatusPill(title: "ONLINE")
+            }
             Button {
                 sharedFilesPresented = true
             } label: {
@@ -153,8 +164,8 @@ struct CardCaptureFlowView: View {
             .accessibilityLabel("Disconnect computer")
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 22)
-        .padding(.top, 12)
+        .padding(.horizontal, compact ? 14 : 22)
+        .padding(.top, compact ? 8 : 12)
     }
 
     private var preparingView: some View {
@@ -206,38 +217,40 @@ struct CardCaptureFlowView: View {
     }
 
     private var optionsView: some View {
-        VStack(spacing: 0) {
-            header
-            VStack(spacing: 10) {
-                Text("CARD MEDIA")
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .tracking(1.6)
-                Text("Add anything that helps show this card clearly.")
-                    .font(.subheadline)
-                    .foregroundStyle(EzcanTheme.muted)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.top, 42)
-            Spacer()
-            VStack(spacing: 13) {
-                optionButton("Additional photo", "Corners, edges, holo or defects", "plus.viewfinder", EzcanTheme.amber) {
-                    phase = .capturing(.additional)
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 0) {
+                header
+                VStack(spacing: 10) {
+                    Text("CARD MEDIA")
+                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .tracking(1.6)
+                    Text("Add anything that helps show this card clearly.")
+                        .font(.subheadline)
+                        .foregroundStyle(EzcanTheme.muted)
+                        .multilineTextAlignment(.center)
                 }
-                optionButton("Surface video", "1080p HD, up to 30 seconds", "video.fill", EzcanTheme.magenta) {
-                    phase = .capturing(.video)
+                .padding(.top, 28)
+                .padding(.bottom, 28)
+                VStack(spacing: 13) {
+                    optionButton("Additional photo", "Corners, edges, holo or defects", "plus.viewfinder", EzcanTheme.amber) {
+                        phase = .capturing(.additional)
+                    }
+                    optionButton("Surface video", "1080p HD, up to 30 seconds", "video.fill", EzcanTheme.magenta) {
+                        phase = .capturing(.video)
+                    }
+                    optionButton("Files from computer", "Download an IPA or other shared file", "arrow.down.circle.fill", EzcanTheme.green) {
+                        sharedFilesPresented = true
+                    }
+                    optionButton("Next", "Choose the archive code", "arrow.right.circle.fill", EzcanTheme.blue) {
+                        phase = .naming
+                    }
                 }
-                optionButton("Files from computer", "Download an IPA or other shared file", "arrow.down.circle.fill", EzcanTheme.green) {
-                    sharedFilesPresented = true
+                .padding(.horizontal, 22)
+                .padding(.bottom, 22)
+                if let statusMessage {
+                    statusBanner(statusMessage)
+                        .padding(.bottom, 20)
                 }
-                optionButton("Next", "Choose the archive code", "arrow.right.circle.fill", EzcanTheme.blue) {
-                    phase = .naming
-                }
-            }
-            .padding(.horizontal, 22)
-            Spacer()
-            if let statusMessage {
-                statusBanner(statusMessage)
-                    .padding(.bottom, 20)
             }
         }
     }

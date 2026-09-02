@@ -16,20 +16,10 @@ struct PairingView: View {
                 EzcanBackground()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("EZCAN")
-                                    .font(.system(size: 30, weight: .black, design: .rounded))
-                                    .tracking(2)
-                                    .foregroundStyle(EzcanTheme.text)
-                                Text("CARD OPERATIONS CONSOLE")
-                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                                    .tracking(0.8)
-                                    .foregroundStyle(EzcanTheme.cyan)
-                            }
-                            Spacer()
-                            EzcanStatusPill(title: "AWAITING PAIRING", color: EzcanTheme.amber)
+                        GeometryReader { proxy in
+                            pairingHeader(compact: proxy.size.width < 370)
                         }
+                        .frame(height: 44)
 
                         VStack(spacing: 14) {
                             Image("ezcan_logo")
@@ -109,6 +99,25 @@ struct PairingView: View {
                 hasOpenedScanner = true
                 scannerPresented = true
             }
+        }
+    }
+
+    private func pairingHeader(compact: Bool) -> some View {
+        HStack(alignment: .top, spacing: compact ? 8 : 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("EZCAN")
+                    .font(.system(size: compact ? 27 : 30, weight: .black, design: .rounded))
+                    .tracking(2)
+                    .foregroundStyle(EzcanTheme.text)
+                if !compact {
+                    Text("CARD OPERATIONS CONSOLE")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .tracking(0.8)
+                        .foregroundStyle(EzcanTheme.cyan)
+                }
+            }
+            Spacer()
+            EzcanStatusPill(title: compact ? "PAIR" : "AWAITING PAIRING", color: EzcanTheme.amber)
         }
     }
 

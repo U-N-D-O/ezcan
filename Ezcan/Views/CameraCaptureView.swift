@@ -49,6 +49,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private let timerLabel = UILabel()
     private let statusLabel = UILabel()
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var cameraDevice: AVCaptureDevice?
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
     private var isRecording = false
@@ -124,11 +125,14 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
 
         guideView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(guideView)
+        let guideWidth = guideView.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.76)
+        guideWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             guideView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             guideView.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -18),
-            guideView.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.76),
-            guideView.heightAnchor.constraint(equalTo: guideView.widthAnchor, multiplier: 1.4)
+            guideWidth,
+            guideView.heightAnchor.constraint(equalTo: guideView.widthAnchor, multiplier: 1.4),
+            guideView.heightAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.heightAnchor, multiplier: 0.52)
         ])
 
         let titleLabel = makeLabel(titleText.uppercased(), size: 27, weight: .bold)
@@ -284,6 +288,8 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                 return
             }
             self.session.addInput(videoInput)
+            self.cameraDevice = camera
+            self.configureContinuousFocus(on: camera)
 
             if self.mode == .photo {
                 guard self.session.canAddOutput(self.photoOutput) else {
@@ -327,6 +333,27 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private func updateStatus(_ message: String) {
         DispatchQueue.main.async { [weak self] in
             self?.statusLabel.text = message
+        }
+    }
+
+    private func configureContinuousFocus(on camera: AVCaptureDevice) {
+        guard camera.isFocusModeSupported(.continuousAutoFocus) else { return }
+        do {
+            try camera.lockForConfiguration()
+            camera.focusMode = .continuousAutoFocus
+            if camera.isFocusPointOfInterestSupported {
+                camera.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
+                camera.isSubjectAreaChangeMonitoringEnabled = true
+            }
+            if camera.isExposureModeSupported(.continuousAutoExposure) {
+                camera.exposureMode = .continuousAutoExposure
+                if camera.isExposurePointOfInterestSupported {
+                    camera.exposurePointOfInterest = CGPoint(x: 0.5, y: 0.5)
+                }
+            }
+            camera.unlockForConfiguration()
+        } catch {
+            updateStatus("Camera focus is unavailable")
         }
     }
 
