@@ -67,7 +67,8 @@ function Show-CompletionAlert {
         Add-Type -AssemblyName PresentationFramework
         $icon = if ($Success) {
             [System.Windows.MessageBoxImage]::Information
-        } else {
+        }
+        else {
             [System.Windows.MessageBoxImage]::Error
         }
         [System.Windows.MessageBox]::Show(
@@ -76,7 +77,8 @@ function Show-CompletionAlert {
             [System.Windows.MessageBoxButton]::OK,
             $icon
         ) | Out-Null
-    } catch {
+    }
+    catch {
         [Console]::Beep(900, 250)
         Write-Host "$Title`n$Message"
     }
@@ -204,9 +206,11 @@ try {
 
         Set-PipelineProgress -Percent 26 -Status "Pushing $pushSha to origin/main..."
         [void](Invoke-Git -Arguments @("push", "origin", "main"))
-    } elseif (-not $RunEvenIfClean) {
+    }
+    elseif (-not $RunEvenIfClean) {
         throw "There are no changes to commit. Make changes first, or run with -RunEvenIfClean to build current main."
-    } else {
+    }
+    else {
         $pushSha = (Invoke-Git -Arguments @("rev-parse", "HEAD")).Trim()
         $manualRun = $true
         Set-PipelineProgress -Percent 26 -Status "Worktree is clean. Starting a manual build for $pushSha..."
@@ -242,7 +246,8 @@ try {
     Write-Host "`nIPA ready: $ipaPath"
     Write-Host "Actions run: $($completedRun.url)"
     Show-CompletionAlert -Title "Ezcan IPA build complete" -Message "The iOS IPA was built and downloaded.`n`n$ipaPath" -Success $true
-} catch {
+}
+catch {
     Write-Progress -Id 1 -Activity "Ezcan iOS IPA pipeline" -Completed
     Show-CompletionAlert -Title "Ezcan IPA build failed" -Message $_.Exception.Message -Success $false
     throw
