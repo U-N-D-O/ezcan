@@ -160,7 +160,7 @@ class EzcanIPABuilder:
             center_x,
             106,
             text="BUILD IPA",
-            fill=self.muted if self.activate_active else CYAN,
+            fill=MUTED if self.activate_active else CYAN,
             font=("Segoe UI", 8, "bold"),
         )
 
