@@ -30,13 +30,13 @@ struct EzcanApp: App {
                 }
                 .alert(item: $sharedFileMonitor.newlyReceivedFile) { file in
                     Alert(
-                        title: Text("New file"),
+                        title: Text("You got a new file"),
                         message: Text("\(file.fileName) is ready on the computer."),
                         primaryButton: .default(Text("Open")) {
                             sharedFileMonitor.dismissNewFile()
                             downloadAndOpen(file)
                         },
-                        secondaryButton: .cancel {
+                        secondaryButton: .cancel(Text("OK")) {
                             sharedFileMonitor.dismissNewFile()
                         }
                     )
