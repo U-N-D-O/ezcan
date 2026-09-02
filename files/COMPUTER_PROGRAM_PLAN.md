@@ -231,6 +231,8 @@ cards
 - finish
 - condition
 - authenticity_status
+- grade_company
+- grade
 - notes
 ```
 
@@ -330,6 +332,33 @@ If eBay does not provide an official programmatic Picture Search API, the comput
 
 The user must confirm the identity before exact market research begins.
 
+### Phone-supplied listing details
+
+The iPhone collects the facts that require the owner's judgment before an intake is archived:
+
+- Language defaults to Japanese.
+- English is selected explicitly with a toggle.
+- Raw condition is selected manually from the condition menu.
+- Graded cards use a grading-company and grade selection instead of raw condition.
+
+The computer must store these values exactly as received and must not infer condition or grade from a photograph. Authenticity is assumed because the owner has authenticated every card before selling; the stored status is `authenticated` and is not presented as a checkbox.
+
+The completion payload should contain:
+
+```json
+{
+  "listingDetails": {
+    "language": "japanese",
+    "condition": "near_mint",
+    "gradeCompany": "none",
+    "grade": "",
+    "authenticityStatus": "authenticated"
+  }
+}
+```
+
+The eBay identity used by the computer is a separate search-only account and is not the seller account. It exists only to search for cards and prices. Seller credentials, listing permissions, and seller-account tokens must not be placed in the EXE or used by the research workflow.
+
 ## 12. Market Research
 
 After card identity is confirmed, collect separate groups of comparable listings:
@@ -355,6 +384,16 @@ auction or fixed-price format
 seller notes
 screenshot path when available
 ```
+
+Both sold and active listings matter. Always retain item price and shipping as separate values, and calculate the buyer-paid comparison as:
+
+```text
+total buyer cost = item price + shipping price
+```
+
+This prevents listings that absorb shipping into the item price from being treated as cheaper than listings with a visible shipping charge. Sold prices are the primary evidence for the market level; active listings describe the current competition.
+
+For the owner's own pricing model, the first card in an order has a shipping charge of `$34 USD` and every additional card in that order has free shipping. For a one-card listing, a target buyer-paid total therefore implies an item price of approximately `target total - 34`, before fees and the desired margin. The recommendation must show both the card price and the resulting buyer-paid total, and must preserve the shipping assumption in the research record.
 
 Screenshots are supporting evidence. Structured data and URLs are the primary records.
 

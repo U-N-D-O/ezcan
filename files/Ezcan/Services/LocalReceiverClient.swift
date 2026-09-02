@@ -33,6 +33,20 @@ struct ArchiveReceipt: Decodable {
     let archiveCode: String
 }
 
+struct IntakeListingDetails {
+    let language: String
+    let condition: String
+    let gradeCompany: String
+    let grade: String
+
+    static let `default` = IntakeListingDetails(
+        language: "japanese",
+        condition: "near_mint",
+        gradeCompany: "none",
+        grade: ""
+    )
+}
+
 struct SharedFile: Decodable, Identifiable, Equatable {
     let fileName: String
     let size: Int
@@ -72,16 +86,28 @@ struct LocalReceiverClient {
     }
 
     func completeIntake(_ intakeId: String) async throws -> ArchiveReceipt {
-        try await completeIntake(intakeId, archiveCode: nil)
+        try await completeIntake(intakeId, archiveCode: nil, details: .default)
     }
 
-    func completeIntake(_ intakeId: String, archiveCode: String?) async throws -> ArchiveReceipt {
+    func completeIntake(
+        _ intakeId: String,
+        archiveCode: String?,
+        details: IntakeListingDetails = .default
+    ) async throws -> ArchiveReceipt {
         let request = try makeRequest(
             path: "api/intakes/\(intakeId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? intakeId)/complete",
             method: "POST",
             contentType: "application/json"
         )
-        var payload: [String: String] = [:]
+        var payload: [String: Any] = [
+            "listingDetails": [
+                "language": details.language,
+                "condition": details.condition,
+                "gradeCompany": details.gradeCompany,
+                "grade": details.grade,
+                "authenticityStatus": "authenticated"
+            ]
+        ]
         if let archiveCode {
             payload["archiveCode"] = archiveCode
         }

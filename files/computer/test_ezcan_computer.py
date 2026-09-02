@@ -91,7 +91,56 @@ def test_intake_upload_and_archive(tmp_path: Path) -> None:
     assert card_folder.is_dir()
     manifest = json.loads((card_folder / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["archiveCode"] == archive_code
+    assert manifest["listingDetails"] == {
+        "language": "japanese",
+        "condition": "near_mint",
+        "gradeCompany": "none",
+        "grade": "",
+        "authenticityStatus": "authenticated",
+    }
     assert (card_folder / "original" / "front.jpg").read_bytes() == content
+
+
+def test_listing_details_are_saved_and_authenticity_is_defaulted(tmp_path: Path) -> None:
+    app = create_app(tmp_path / "data")
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {app.state.token}"}
+    intake_id = client.post("/api/intakes", headers=headers, json={}).json()["intakeId"]
+    content = b"english-graded-card"
+    media_headers = {
+        **headers,
+        "X-Ezcan-File-Name": "front.jpg",
+        "X-Ezcan-Media-Type": "image",
+        "X-Ezcan-SHA256": hashlib.sha256(content).hexdigest(),
+    }
+    assert client.post(f"/api/intakes/{intake_id}/media", headers=media_headers, content=content).status_code == 200
+
+    response = client.post(
+        f"/api/intakes/{intake_id}/complete",
+        headers=headers,
+        json={
+            "listingDetails": {
+                "language": "english",
+                "condition": "graded",
+                "gradeCompany": "psa",
+                "grade": "9",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    archive_code = response.json()["archiveCode"]
+    manifest = json.loads((tmp_path / "data" / "Cards" / archive_code / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["listingDetails"] == {
+        "language": "english",
+        "condition": "graded",
+        "gradeCompany": "psa",
+        "grade": "9",
+        "authenticityStatus": "authenticated",
+    }
+    with app.state.store.connection() as connection:
+        card = connection.execute("SELECT language, condition, grade_company, grade, authenticity_status FROM cards").fetchone()
+    assert tuple(card) == ("english", "graded", "psa", "9", "authenticated")
 
 
 def test_upload_retry_is_idempotent(tmp_path: Path) -> None:

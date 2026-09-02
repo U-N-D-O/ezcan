@@ -30,6 +30,9 @@ SEQUENTIAL_ARCHIVE_DIGITS = "0123456789"
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
 MAX_VIDEO_BYTES = 300 * 1024 * 1024
 MAX_SHARED_FILE_BYTES = 1024 * 1024 * 1024
+SUPPORTED_LANGUAGES = {"japanese", "english"}
+SUPPORTED_CONDITIONS = {"near_mint", "excellent", "very_good", "good", "played", "poor", "graded"}
+SUPPORTED_GRADING_COMPANIES = {"none", "psa", "bgs", "cgc", "other"}
 
 
 def pairing_qr_image(payload: str, target_pixels: int):
@@ -90,6 +93,30 @@ def valid_archive_code(value: str) -> bool:
         and value[3].isascii()
         and value[3].isdigit()
     )
+
+
+def validate_card_details(details: dict[str, str]) -> dict[str, str]:
+    language = details.get("language", "japanese")
+    condition = details.get("condition", "near_mint")
+    grade_company = details.get("gradeCompany", "none")
+    grade = details.get("grade", "")
+    if language not in SUPPORTED_LANGUAGES:
+        raise HTTPException(status_code=422, detail="Language must be Japanese or English")
+    if condition not in SUPPORTED_CONDITIONS:
+        raise HTTPException(status_code=422, detail="Unsupported card condition")
+    if grade_company not in SUPPORTED_GRADING_COMPANIES:
+        raise HTTPException(status_code=422, detail="Unsupported grading company")
+    if grade_company == "none" and grade:
+        raise HTTPException(status_code=422, detail="Ungraded cards cannot have a grade")
+    if grade_company != "none" and not grade:
+        raise HTTPException(status_code=422, detail="A grade is required for graded cards")
+    return {
+        "language": language,
+        "condition": condition,
+        "gradeCompany": grade_company,
+        "grade": grade,
+        "authenticityStatus": "authenticated",
+    }
 
 
 def increment_archive_code(value: str) -> str:
@@ -170,6 +197,8 @@ class Store:
                     printing TEXT,
                     finish TEXT,
                     condition TEXT,
+                    grade_company TEXT,
+                    grade TEXT,
                     authenticity_status TEXT,
                     notes TEXT
                 );
@@ -179,6 +208,11 @@ class Store:
                 );
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(cards)")}
+            if "grade_company" not in columns:
+                connection.execute("ALTER TABLE cards ADD COLUMN grade_company TEXT")
+            if "grade" not in columns:
+                connection.execute("ALTER TABLE cards ADD COLUMN grade TEXT")
 
     def create_intake(self, note: str | None) -> tuple[str, Path, str]:
         intake_id = str(uuid.uuid4())
@@ -217,7 +251,12 @@ class Store:
                 (intake_id, file_name, str(file_path), media_type, file_hash, file_size, utc_now()),
             )
 
-    def finalize(self, intake_id: str, requested_archive_code: str | None = None) -> str:
+    def finalize(
+        self,
+        intake_id: str,
+        requested_archive_code: str | None = None,
+        details: dict[str, str] | None = None,
+    ) -> str:
         intake = self.intake(intake_id)
         if intake is None:
             raise HTTPException(status_code=404, detail="Intake not found")
@@ -226,6 +265,7 @@ class Store:
         media = self.media(intake_id)
         if not media:
             raise HTTPException(status_code=400, detail="At least one media file is required")
+        card_details = validate_card_details(details or {})
 
         if requested_archive_code:
             archive_code = requested_archive_code
@@ -277,8 +317,20 @@ class Store:
                 (archive_code,),
             )
             connection.execute(
-                "INSERT INTO cards (internal_id, archive_code, folder_path, status, created_at, updated_at, notes) VALUES (?, ?, ?, 'received', ?, ?, ?)",
-                (internal_id, archive_code, str(final_path), now, now, intake["note"]),
+                "INSERT INTO cards (internal_id, archive_code, folder_path, status, created_at, updated_at, language, condition, grade_company, grade, authenticity_status, notes) VALUES (?, ?, ?, 'received', ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    internal_id,
+                    archive_code,
+                    str(final_path),
+                    now,
+                    now,
+                    card_details["language"],
+                    card_details["condition"],
+                    card_details["gradeCompany"],
+                    card_details["grade"],
+                    card_details["authenticityStatus"],
+                    intake["note"],
+                ),
             )
 
         manifest = {
@@ -287,6 +339,7 @@ class Store:
             "intakeId": intake_id,
             "status": "received",
             "createdAt": intake["created_at"],
+            "listingDetails": card_details,
             "media": manifest_media,
         }
         (final_path / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -511,7 +564,12 @@ def create_app(data_root: Path | None = None) -> FastAPI:
             body = await request.json()
         except json.JSONDecodeError:
             body = {}
-        return {"archiveCode": store.finalize(intake_id, body.get("archiveCode"))}
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=422, detail="Completion payload must be an object")
+        details = body.get("listingDetails", {})
+        if not isinstance(details, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in details.items()):
+            raise HTTPException(status_code=422, detail="Listing details must contain text values")
+        return {"archiveCode": store.finalize(intake_id, body.get("archiveCode"), details)}
 
     return app
 

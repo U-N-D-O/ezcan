@@ -40,6 +40,10 @@ struct CardCaptureFlowView: View {
     @EnvironmentObject private var pairingStore: PairingStore
     @State private var intakeID: String?
     @State private var archiveCode = ""
+    @State private var isEnglishCard = false
+    @State private var rawCondition = "near_mint"
+    @State private var gradingCompany = "none"
+    @State private var grade = "10"
     @State private var phase: CapturePhase = .preparing
     @State private var cameraStage: CaptureStage?
     @State private var capturedMedia: [CapturedMedia] = []
@@ -374,6 +378,7 @@ struct CardCaptureFlowView: View {
                 Text("Archive this card")
                     .font(.title2.bold())
                     .foregroundStyle(EzcanTheme.ink)
+                listingDetailsView
                 TextField("A2B4", text: $archiveCode)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
@@ -411,6 +416,68 @@ struct CardCaptureFlowView: View {
                 .frame(maxWidth: 520)
             }
             .padding(.vertical, 18)
+        }
+    }
+
+    private var listingDetailsView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("LISTING DETAILS")
+                .font(.system(size: 12, weight: .black, design: .rounded))
+                .foregroundStyle(EzcanTheme.blue)
+            Toggle(isOn: $isEnglishCard) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("English card")
+                        .font(.headline)
+                        .foregroundStyle(EzcanTheme.ink)
+                    Text(isEnglishCard ? "English selected" : "Japanese selected by default")
+                        .font(.caption)
+                        .foregroundStyle(EzcanTheme.muted)
+                }
+            }
+            .tint(EzcanTheme.blue)
+            detailPicker("Card status", selection: $gradingCompany) {
+                Text("Raw card").tag("none")
+                Text("PSA graded").tag("psa")
+                Text("BGS graded").tag("bgs")
+                Text("CGC graded").tag("cgc")
+                Text("Other graded").tag("other")
+            }
+            if gradingCompany == "none" {
+                detailPicker("Condition", selection: $rawCondition) {
+                    Text("Near mint").tag("near_mint")
+                    Text("Excellent").tag("excellent")
+                    Text("Very good").tag("very_good")
+                    Text("Good").tag("good")
+                    Text("Played").tag("played")
+                    Text("Poor").tag("poor")
+                }
+            } else {
+                detailPicker("Grade", selection: $grade) {
+                    ForEach(["10", "9.5", "9", "8.5", "8", "7", "6", "5", "4", "3", "2", "1"], id: \.self) { value in
+                        Text(value).tag(value)
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: 520)
+        .background(EzcanTheme.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(EzcanTheme.line, lineWidth: 1) }
+    }
+
+    private func detailPicker<Content: View>(
+        _ title: String,
+        selection: Binding<String>,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(EzcanTheme.ink)
+            Spacer()
+            Picker(title, selection: selection, content: content)
+                .pickerStyle(.menu)
+                .tint(EzcanTheme.blue)
         }
     }
 
@@ -641,7 +708,17 @@ struct CardCaptureFlowView: View {
         guard let intakeID, let pairing = pairingStore.pairing else { return }
         isBusy = true
         do {
-            let receipt = try await LocalReceiverClient(pairing: pairing).completeIntake(intakeID, archiveCode: archiveCode)
+            let details = IntakeListingDetails(
+                language: isEnglishCard ? "english" : "japanese",
+                condition: gradingCompany == "none" ? rawCondition : "graded",
+                gradeCompany: gradingCompany,
+                grade: gradingCompany == "none" ? "" : grade
+            )
+            let receipt = try await LocalReceiverClient(pairing: pairing).completeIntake(
+                intakeID,
+                archiveCode: archiveCode,
+                details: details
+            )
             await MainActor.run {
                 isBusy = false
                 deleteCachedFrontPhoto()
@@ -667,6 +744,10 @@ struct CardCaptureFlowView: View {
     private func resetForNextCard() {
         intakeID = nil
         archiveCode = ""
+        isEnglishCard = false
+        rawCondition = "near_mint"
+        gradingCompany = "none"
+        grade = "10"
         phase = .preparing
         cameraStage = nil
         capturedMedia = []

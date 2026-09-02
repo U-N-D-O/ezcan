@@ -20,7 +20,7 @@ The capture camera has an `AUTO` lens mode that watches focus distance and cente
 - Upload the intake to the computer.
 - Display the sequential archive code returned by the computer.
 
-The computer program owns card identification, eBay Picture Search, pricing, listing drafts, and permanent inventory records.
+The computer program owns card identification, eBay Picture Search, pricing, listing drafts, and permanent inventory records. Before archiving, the iPhone records the manual listing details: Japanese is the default language, English must be selected explicitly, and raw condition or grading company/grade is chosen by the owner. Authenticity is assumed after the owner's inspection.
 
 ## Build Locally
 
@@ -123,4 +123,4 @@ Build the executable locally:
 python make_ezcan_exe.py --no-pause
 ```
 
-Build `EzcanComputer.exe` locally on the Windows computer with the command above. The output is placed at the repository root. eBay Picture Search, market research, and listing-draft screens are the next computer-program phase.
+Build `EzcanComputer.exe` locally on the Windows computer with the command above. The output is placed at the repository root. eBay Picture Search, market research, and listing-draft screens are the next computer-program phase. Market research will use a separate search-only eBay account, retain sold and active prices with shipping separately, and compare total buyer cost. The owner's pricing model is `$34 USD` shipping for the first card in an order and free shipping for additional cards.
