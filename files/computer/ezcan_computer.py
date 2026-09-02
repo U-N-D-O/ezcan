@@ -2118,8 +2118,9 @@ class DesktopWindow:
             messagebox.showinfo("Review Listing Draft", "Select an archived card first.")
             return
         archive_code = str(selected[0])
+        card = self.store.card_by_archive_code(archive_code)
         listing = self.store.latest_listing_draft(archive_code)
-        if listing is None:
+        if card is None or listing is None:
             messagebox.showinfo("Review Listing Draft", "Create a local listing draft first.")
             return
         try:
@@ -2164,6 +2165,33 @@ class DesktopWindow:
                 padx=14,
                 pady=9,
             ).pack(fill="x", pady=(0, 16))
+            image_strip = tk.Frame(body, bg=self.panel)
+            image_strip.pack(fill="x", pady=(0, 16))
+            image_strip.grid_columnconfigure(0, weight=1)
+            image_strip.grid_columnconfigure(1, weight=1)
+            draft_photos = []
+            try:
+                card_folder = Path(card["folder_path"])
+                preview_paths = (find_front_image(card_folder), find_back_image(card_folder))
+            except (FileNotFoundError, OSError, StopIteration):
+                preview_paths = (None, None)
+            for column, (title, image_path) in enumerate(zip(("FRONT", "BACK"), preview_paths)):
+                cell = tk.Frame(image_strip, bg=self.panel_deep, height=145, highlightthickness=1, highlightbackground=self.border)
+                cell.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 6 if column == 0 else 0))
+                cell.grid_propagate(False)
+                tk.Label(cell, text=title, bg=self.panel_deep, fg=self.cyan, font=("Consolas", 8, "bold")).pack(anchor="nw", padx=9, pady=(7, 0))
+                image_label = tk.Label(cell, text="No preview", bg=self.panel_deep, fg=self.muted, font=("Consolas", 8))
+                image_label.pack(expand=True)
+                if image_path is not None:
+                    try:
+                        with Image.open(image_path) as image:
+                            image.thumbnail((105, 118), Image.Resampling.LANCZOS)
+                            photo = ImageTk.PhotoImage(image.copy())
+                        draft_photos.append(photo)
+                        image_label.configure(image=photo, text="")
+                    except OSError:
+                        pass
+                dialog.draft_photos = draft_photos
         tk.Label(body, text="TITLE", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w")
         title_var = tk.StringVar(value=str(draft.get("title", "")))
         tk.Entry(body, textvariable=title_var, width=80).pack(fill="x", pady=(4, 14))
