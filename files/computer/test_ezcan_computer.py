@@ -9,7 +9,7 @@ from PIL import Image
 from ebay import open_picture_search
 from ebay_account import EbayAccountManager
 from ezcan_computer import Store, card_action_availability, create_app, default_data_root, increment_archive_code, program_directory
-from image_processor import prepare_search_image
+from image_processor import find_back_image, prepare_search_image
 from pricing import recommend_price
 
 
@@ -425,6 +425,18 @@ def test_prepare_search_image_fails_without_an_original_image(tmp_path: Path) ->
         assert "No image was found" in str(error)
     else:
         raise AssertionError("Expected missing front image to fail")
+
+
+def test_find_back_image_prefers_named_back_and_falls_back_to_second_image(tmp_path: Path) -> None:
+    original = tmp_path / "original"
+    original.mkdir()
+    Image.new("RGB", (100, 100), "red").save(original / "front.jpg")
+    Image.new("RGB", (100, 100), "blue").save(original / "back.jpg")
+    assert find_back_image(tmp_path) == original / "back.jpg"
+
+    (original / "back.jpg").unlink()
+    Image.new("RGB", (100, 100), "blue").save(original / "scan-02.jpg")
+    assert find_back_image(tmp_path) == original / "scan-02.jpg"
 
 
 def test_picture_search_opener_receives_prepared_image(tmp_path: Path) -> None:

@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ebay import open_picture_search
 from ebay_account import EbayAccountManager
-from image_processor import IMAGE_SUFFIXES, prepare_search_image
+from image_processor import IMAGE_SUFFIXES, find_back_image, find_front_image, prepare_search_image
 from listing_drafts import build_listing_draft
 from pricing import PricingRecommendation, recommend_price
 
@@ -1456,8 +1456,12 @@ class DesktopWindow:
         preview = tk.Frame(frame, bg=self.panel_deep, height=220, highlightthickness=1, highlightbackground=self.border)
         preview.pack(fill="x", padx=20, pady=18)
         preview.pack_propagate(False)
-        self.selected_preview = tk.Label(preview, text="No card selected", bg=self.panel_deep, fg=self.muted, font=("Segoe UI", 10))
-        self.selected_preview.pack(expand=True)
+        preview.grid_columnconfigure(0, weight=1)
+        preview.grid_columnconfigure(1, weight=1)
+        self.selected_preview_front = tk.Label(preview, text="FRONT\nNo preview", bg=self.panel_deep, fg=self.muted, font=("Consolas", 8), justify="center")
+        self.selected_preview_front.grid(row=0, column=0, sticky="nsew", padx=(8, 4), pady=8)
+        self.selected_preview_back = tk.Label(preview, text="BACK\nNo preview", bg=self.panel_deep, fg=self.muted, font=("Consolas", 8), justify="center")
+        self.selected_preview_back.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
         tk.Label(frame, textvariable=self.selected_details_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 10), justify="left", anchor="w", wraplength=360).pack(fill="x", padx=20)
         actions = tk.Frame(frame, bg=self.panel)
         actions.pack(fill="x", padx=20, pady=(22, 20))
@@ -1686,8 +1690,9 @@ class DesktopWindow:
                     "The archive move was interrupted before Ezcan could finish the database record.\n"
                     "Open the archive folder and resolve this intake before starting eBay research."
                 )
-                self.selected_photo = None
-                self.selected_preview.configure(image="", text="Archive recovery needed")
+                self.selected_photos = []
+                self.selected_preview_front.configure(image="", text="FRONT\nArchive recovery needed")
+                self.selected_preview_back.configure(image="", text="BACK\nArchive recovery needed")
             self.update_card_actions(None)
             return
         self.update_card_actions(card)
@@ -1698,19 +1703,27 @@ class DesktopWindow:
             f"{card['set_name'] or 'Set not confirmed'}"
             f"{(' / ' + str(card['card_number'])) if card['card_number'] else ''}"
         )
-        self.selected_photo = None
+        self.selected_photos = []
         try:
-            original = Path(card["folder_path"]) / "original"
-            image_path = next(
-                path for path in sorted(original.iterdir())
-                if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
-            )
-            with Image.open(image_path) as image:
-                image.thumbnail((280, 205), Image.Resampling.LANCZOS)
-                self.selected_photo = ImageTk.PhotoImage(image.copy())
-            self.selected_preview.configure(image=self.selected_photo, text="")
+            card_folder = Path(card["folder_path"])
+            front_path = find_front_image(card_folder)
+            back_path = find_back_image(card_folder)
+            for label, image_path, title in (
+                (self.selected_preview_front, front_path, "FRONT"),
+                (self.selected_preview_back, back_path, "BACK"),
+            ):
+                if image_path is None:
+                    label.configure(image="", text=f"{title}\nNo preview")
+                    continue
+                with Image.open(image_path) as image:
+                    image.thumbnail((145, 195), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(image.copy())
+                self.selected_photos.append(photo)
+                label.configure(image=photo, text="")
         except (FileNotFoundError, OSError, StopIteration):
-            self.selected_preview.configure(image="", text="No preview image")
+            self.selected_photos = []
+            self.selected_preview_front.configure(image="", text="FRONT\nNo preview")
+            self.selected_preview_back.configure(image="", text="BACK\nNo preview")
 
     def open_selected_card(self) -> None:
         self.on_card_selected()
