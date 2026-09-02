@@ -8,6 +8,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SOURCE_FILE = PROJECT_ROOT / "computer" / "ezcan_computer.py"
+ICON_FILE = PROJECT_ROOT / "icons" / "ezcan_logo.ico"
 DIST_DIR = PROJECT_ROOT / "dist"
 BUILD_DIR = PROJECT_ROOT / "build"
 
@@ -37,6 +38,8 @@ def run_build() -> int:
         "--windowed",
         "--name",
         "EzcanComputer",
+        "--icon",
+        str(ICON_FILE),
         "--distpath",
         str(DIST_DIR),
         "--workpath",

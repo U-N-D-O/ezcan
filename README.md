@@ -32,7 +32,7 @@ xcodegen generate
 open Ezcan.xcodeproj
 ```
 
-The project targets iOS 17 or newer and uses the bundle identifier `com.undu.ezcan` by default. Change the bundle identifier and signing team in `project.yml` before distributing the app.
+The project targets iOS 17 or newer and uses the bundle identifier `com.undu.ezcan` by default. The iOS app icon is registered as `AppIcon` from `icons/ios`. Change the bundle identifier and signing team in `project.yml` before distributing the app.
 
 ## GitHub Actions
 
@@ -119,7 +119,7 @@ To transfer the IPA without email, download the direct `.ipa` from the latest re
 Build the executable locally:
 
 ```powershell
-python -m PyInstaller --clean --noconfirm --onefile --windowed --name EzcanComputer computer\ezcan_computer.py
+python -m PyInstaller --clean --noconfirm --onefile --windowed --name EzcanComputer --icon icons\ezcan_logo.ico computer\ezcan_computer.py
 ```
 
 Build `EzcanComputer.exe` locally on the Windows computer with the command above. eBay Picture Search, market research, and listing-draft screens are the next computer-program phase.

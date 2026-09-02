@@ -37,7 +37,7 @@ Data is stored in `%LOCALAPPDATA%\Ezcan` on Windows. Set `EZCAN_DATA_DIR` to cho
 ## Build the executable locally
 
 ```powershell
-python -m PyInstaller --clean --noconfirm --onefile --name EzcanComputer computer\ezcan_computer.py
+python -m PyInstaller --clean --noconfirm --onefile --name EzcanComputer --icon icons\ezcan_logo.ico computer\ezcan_computer.py
 ```
 
 The executable is created at `dist\EzcanComputer.exe`.
