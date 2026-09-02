@@ -6,9 +6,31 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from ebay import open_picture_search
+from ebay_account import EbayAccountManager
 from ezcan_computer import create_app, default_data_root, increment_archive_code, program_directory
 from image_processor import prepare_search_image
 from pricing import recommend_price
+
+
+def test_ebay_account_profile_stores_state_without_credentials(tmp_path: Path) -> None:
+    manager = EbayAccountManager(tmp_path / "Ezcan")
+    assert manager.state()["status"] == "not_connected"
+
+    manager._browser_executable = lambda: None
+    launch = manager.begin_sign_in(opener=lambda _url: True)
+
+    assert launch.persistent is False
+    assert launch.profile_path == tmp_path / "Ezcan" / "browser-profile"
+    assert manager.state()["status"] == "login_required"
+    metadata = manager.metadata_path.read_text(encoding="utf-8")
+    assert "password" not in metadata.lower()
+    assert "username" not in metadata.lower()
+
+    manager.mark_connected()
+    assert manager.state()["status"] == "connected"
+    manager.remove_profile()
+    assert manager.state()["status"] == "not_connected"
+    assert not manager.profile_path.exists()
 
 
 def test_default_archive_is_next_to_program() -> None:

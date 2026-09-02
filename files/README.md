@@ -101,8 +101,10 @@ The computer receiver currently supports:
 - Permanent card folders named with the archive code.
 - SQLite records and JSON manifests.
 - A native desktop console with QR pairing, live intake statistics, and recent-card activity.
+- A selected-card workbench with a `Recent Activity` list, card preview, metadata, and next-action controls. The list does not expose raw folder paths or precise received timestamps.
 - An `Archive` folder beside the running program, with each card stored under `Archive\Cards\<archiveCode>`.
 - A `Send to iPhone` file shelf for downloaded IPA files and other files you want to share to the paired phone.
+- A separate headed eBay search-account browser profile under `%LOCALAPPDATA%\Ezcan\browser-profile`; Ezcan stores profile state only and never collects the eBay password.
 
 Run it from source with Windows PowerShell:
 
@@ -124,3 +126,5 @@ python make_ezcan_exe.py --no-pause
 ```
 
 Build `EzcanComputer.exe` locally on the Windows computer with the command above. The output is placed at the repository root. The Windows workflow at `.github/workflows/build-windows.yml` runs the computer tests, builds `EzcanComputer.exe`, and uploads it as the `ezcan-windows-exe` artifact. The computer supports a visible, manual eBay Picture Search handoff, sold and active match recording, identity confirmation, shipping-aware pricing, and unpublished local listing drafts. Market research uses a separate search-only eBay account, retains sold and active prices with shipping separately, and compares total buyer cost. The owner's pricing model is `$34 USD` shipping for the first card in an order and free shipping for additional cards.
+
+Use `SIGN IN / OPEN EBAY` in the desktop pairing panel to open the separate search-only account profile. Sign in manually in the visible browser and confirm with `I'M SIGNED IN`; `REMOVE SESSION` deletes the local profile. Picture Search remains user-assisted at the camera/file chooser and never bypasses login, CAPTCHA, or two-factor challenges. Seller OAuth and live publishing are disabled.

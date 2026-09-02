@@ -21,11 +21,13 @@ from pathlib import Path
 from typing import Iterator
 
 import qrcode
+from PIL import Image, ImageTk
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ebay import open_picture_search
+from ebay_account import EbayAccountManager
 from image_processor import IMAGE_SUFFIXES, prepare_search_image
 from listing_drafts import build_listing_draft
 from pricing import PricingRecommendation, recommend_price
@@ -843,8 +845,10 @@ class DesktopWindow:
         self.root.configure(bg=self.background)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.address = f"http://{computer_ip()}:{application.state.port}"
+        self.ebay_account = EbayAccountManager()
         self.address_var = tk.StringVar(value=self.address)
         self.connection_var = tk.StringVar(value="ONLINE - PRIVATE NETWORK")
+        self.ebay_account_var = tk.StringVar(value="eBay search account: not connected")
         self.archive_var = tk.StringVar(value=str(self.store.root))
         self.transfer_var = tk.StringVar(value="No files queued")
         self.cards_var = tk.StringVar(value="0")
@@ -855,6 +859,11 @@ class DesktopWindow:
         self.candidate_var = tk.StringVar(value="Record a selected eBay result")
         self.identity_var = tk.StringVar(value="Confirm the exact card identity")
         self.draft_var = tk.StringVar(value="Create a local draft after confirmation")
+        self.selected_archive_code: str | None = None
+        self.selected_card_var = tk.StringVar(value="Select a card from Recent Activity")
+        self.selected_details_var = tk.StringVar(value="")
+        self.selected_state_var = tk.StringVar(value="")
+        self.selected_photo: tk.PhotoImage | None = None
         self.qr_photo: tk.PhotoImage | None = None
         self.tree: ttk.Treeview
         self.build_styles()
@@ -1003,16 +1012,30 @@ class DesktopWindow:
         shell.pack(fill="both", expand=True, padx=42, pady=34)
         self.root.bind("<Escape>", lambda _event: self.close())
 
+        header = tk.Frame(shell, bg=self.background)
+        header.pack(fill="x", pady=(0, 20))
+        heading = tk.Frame(header, bg=self.background)
+        heading.pack(side="left")
+        tk.Label(heading, text="EZCAN / CARD WORKBENCH", bg=self.background, fg=self.cyan, font=("Consolas", 10, "bold")).pack(anchor="w")
+        tk.Label(heading, text="Recent cards, one clear next action", bg=self.background, fg=self.text, font=("Bahnschrift", 22, "bold")).pack(anchor="w", pady=(4, 0))
+        tk.Label(header, textvariable=self.connection_var, bg=self.background, fg=self.green, font=("Consolas", 9, "bold")).pack(side="right", anchor="s", pady=(0, 5))
+
+        utilities = tk.Frame(shell, bg=self.background)
+        utilities.pack(fill="x", pady=(0, 20))
+        tk.Label(utilities, text="UTILITIES", bg=self.background, fg=self.muted, font=("Consolas", 8, "bold")).pack(side="left", padx=(0, 12))
+        self.rounded_button(utilities, "OPEN ARCHIVE", self.open_archive, 142, self.blue).pack(side="left", padx=(0, 10))
+        self.rounded_button(utilities, "SEND TO IPHONE", self.choose_file_for_iphone, 158, self.magenta).pack(side="left")
+
         workspace = tk.Frame(shell, bg=self.background)
         workspace.pack(fill="both", expand=True)
-        workspace.grid_columnconfigure(0, weight=5)
-        workspace.grid_columnconfigure(1, weight=3)
+        workspace.grid_columnconfigure(0, weight=2)
+        workspace.grid_columnconfigure(1, weight=4)
+        workspace.grid_columnconfigure(2, weight=4)
         workspace.grid_rowconfigure(0, weight=1)
-        workspace.grid_rowconfigure(1, weight=0)
 
-        self.build_connection_dock(workspace).grid(row=0, column=0, sticky="nsew", padx=(0, 42))
-        self.build_archive_surface(workspace).grid(row=0, column=1, sticky="nsew")
-        self.build_action_strip(workspace).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(30, 0))
+        self.build_connection_dock(workspace).grid(row=0, column=0, sticky="nsew", padx=(0, 24))
+        self.build_archive_surface(workspace).grid(row=0, column=1, sticky="nsew", padx=(0, 24))
+        self.build_selected_card_workspace(workspace).grid(row=0, column=2, sticky="nsew")
         self.root.state("zoomed")
 
     def raised_surface(self, parent: tk.Misc, accent: str | None = None) -> tuple[tk.Frame, tk.Frame]:
@@ -1046,65 +1069,113 @@ class DesktopWindow:
         address_label.bind("<Button-1>", lambda _event: self.copy_text(self.address))
         tk.Label(content, text="Tap the address to copy it", bg=self.background, fg=self.muted, font=("Segoe UI", 8)).pack(anchor="w")
         self.rounded_button(content, "COPY ADDRESS", lambda: self.copy_text(self.address), 172, self.blue).pack(anchor="w", pady=(16, 0))
+        ebay = tk.Frame(content, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        ebay.pack(fill="x", pady=(28, 0))
+        tk.Label(ebay, text="EBAY SEARCH ACCOUNT", bg=self.panel, fg=self.magenta, font=("Consolas", 9, "bold")).pack(anchor="w", padx=14, pady=(14, 3))
+        tk.Label(ebay, textvariable=self.ebay_account_var, bg=self.panel, fg=self.text, font=("Segoe UI", 9), wraplength=230, justify="left").pack(anchor="w", padx=14)
+        self.rounded_button(ebay, "SIGN IN / OPEN EBAY", self.connect_ebay_account, 190, self.magenta).pack(anchor="w", padx=14, pady=(12, 7))
+        controls = tk.Frame(ebay, bg=self.panel)
+        controls.pack(fill="x", padx=14, pady=(0, 14))
+        tk.Button(controls, text="I'M SIGNED IN", command=self.confirm_ebay_account, relief="flat", cursor="hand2").pack(side="left")
+        tk.Button(controls, text="REMOVE SESSION", command=self.remove_ebay_account, relief="flat", cursor="hand2").pack(side="right")
+        self.refresh_ebay_account_status()
         return frame
 
-    def build_action_strip(self, parent: tk.Misc) -> tk.Frame:
-        strip = tk.Frame(parent, bg=self.background)
-        strip.grid_columnconfigure(0, weight=1)
-        strip.grid_columnconfigure(1, weight=1)
-        strip.grid_columnconfigure(2, weight=1)
-        strip.grid_columnconfigure(3, weight=1)
-        strip.grid_columnconfigure(4, weight=1)
-        strip.grid_columnconfigure(5, weight=1)
-        self.action_line(strip, 0, "ARCHIVE", self.archive_var, "OPEN", self.open_archive, self.blue)
-        self.action_line(strip, 1, "SEND TO IPHONE", self.transfer_var, "CHOOSE", self.choose_file_for_iphone, self.magenta)
-        self.action_line(strip, 2, "EBAY PICTURE SEARCH", self.research_var, "SEARCH", self.search_selected_card, self.green)
-        self.action_line(strip, 3, "EBAY MATCH", self.candidate_var, "ADD", self.record_selected_candidate, self.amber)
-        self.action_line(strip, 4, "CARD IDENTITY", self.identity_var, "REVIEW", self.review_selected_matches, self.cyan)
-        self.action_line(strip, 5, "LISTING DRAFT", self.draft_var, "MAKE", self.create_draft_for_selected_card, self.blue)
-        return strip
+    def refresh_ebay_account_status(self) -> None:
+        status = self.ebay_account.state()["status"]
+        labels = {
+            "not_connected": "eBay search account: not connected",
+            "login_required": "eBay search account: sign-in required",
+            "connected": "eBay search account: connected",
+        }
+        self.ebay_account_var.set(labels[status])
 
-    def action_line(self, parent: tk.Misc, column: int, title: str, value: tk.StringVar, button_text: str, command, accent: str) -> None:
-        line = tk.Frame(parent, bg=self.background)
-        line.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 22, 22 if column == 0 else 0))
-        tk.Frame(line, bg=accent, width=4, height=46).pack(side="left", fill="y", padx=(0, 14))
-        details = tk.Frame(line, bg=self.background)
-        details.pack(side="left", fill="x", expand=True)
-        tk.Label(details, text=title, bg=self.background, fg=accent, font=("Consolas", 8, "bold")).pack(anchor="w")
-        tk.Label(details, textvariable=value, bg=self.background, fg=self.text, font=("Segoe UI", 9), anchor="w").pack(anchor="w", pady=(4, 0))
-        self.rounded_button(line, button_text, command, 112, accent, foreground="#ffffff").pack(side="right", pady=1)
+    def connect_ebay_account(self) -> None:
+        try:
+            launch = self.ebay_account.begin_sign_in()
+        except OSError as error:
+            messagebox.showerror("eBay Search Account", f"Could not open eBay sign-in.\n\n{error}")
+            return
+        self.refresh_ebay_account_status()
+        if launch.persistent:
+            messagebox.showinfo(
+                "eBay Search Account",
+                "A separate eBay browser profile is open. Sign in there, then click I'M SIGNED IN in Ezcan.\n\n"
+                "Ezcan stores no username, password, seller credentials, or raw eBay token.",
+            )
+        else:
+            messagebox.showinfo(
+                "eBay Search Account",
+                "eBay opened in your default browser. Sign in there, then click I'M SIGNED IN in Ezcan.\n\n"
+                "A browser with profile support was not found, so this session may not persist separately.",
+            )
 
-    def action_tile(self, parent: tk.Misc, column: int, title: str, value: tk.StringVar, button_text: str, command, accent: str, icon: str) -> None:
-        frame, content = self.raised_surface(parent, accent)
-        frame.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 9, 9 if column == 0 else 0))
-        tk.Label(content, text=icon, bg=self.panel_alt, fg=accent, font=("Bahnschrift", 18, "bold"), width=3).pack(side="left", padx=(12, 4), pady=11)
-        details = tk.Frame(content, bg=self.panel)
-        details.pack(side="left", fill="x", expand=True, padx=8, pady=10)
-        tk.Label(details, text=title, bg=self.panel, fg=accent, font=("Consolas", 7, "bold")).pack(anchor="w")
-        tk.Label(details, textvariable=value, bg=self.panel, fg=self.text, font=("Segoe UI", 9), anchor="w").pack(anchor="w", pady=(3, 0))
-        self.rounded_button(content, button_text, command, 126, accent, foreground=self.text).pack(side="right", padx=14, pady=10)
+    def confirm_ebay_account(self) -> None:
+        try:
+            self.ebay_account.mark_connected()
+        except ValueError as error:
+            messagebox.showinfo("eBay Search Account", str(error))
+            return
+        self.refresh_ebay_account_status()
+
+    def remove_ebay_account(self) -> None:
+        if not messagebox.askyesno("Remove eBay Session", "Remove Ezcan's separate eBay browser profile from this computer?"):
+            return
+        try:
+            self.ebay_account.remove_profile()
+        except OSError as error:
+            messagebox.showerror("Remove eBay Session", f"Could not remove the browser profile.\n\n{error}")
+            return
+        self.refresh_ebay_account_status()
 
     def build_archive_surface(self, parent: tk.Misc) -> tk.Frame:
         frame = tk.Frame(parent, bg=self.background)
         content = tk.Frame(frame, bg=self.background)
         content.pack(fill="both", expand=True)
-        tk.Label(content, text="RECENT ACTIVITY", bg=self.background, fg=self.text, font=("Bahnschrift", 18, "bold")).pack(anchor="w")
+        title_row = tk.Frame(content, bg=self.background)
+        title_row.pack(fill="x")
+        tk.Label(title_row, text="Recent Activity", bg=self.background, fg=self.text, font=("Bahnschrift", 18, "bold")).pack(side="left")
+        tk.Label(title_row, text="Select a card to continue", bg=self.background, fg=self.muted, font=("Segoe UI", 9)).pack(side="right", pady=(6, 0))
         tk.Label(content, textvariable=self.updated_var, bg=self.background, fg=self.muted, font=("Consolas", 8)).pack(anchor="w", pady=(4, 16))
         table_frame = tk.Frame(content, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
         table_frame.pack(fill="both", expand=True)
-        self.tree = ttk.Treeview(table_frame, columns=("code", "status", "folder", "created"), show="headings", style="Ezcan.Treeview")
-        headings = {"code": "ARCHIVE CODE", "status": "STATUS", "folder": "FOLDER", "created": "RECEIVED"}
-        widths = {"code": 130, "status": 120, "folder": 300, "created": 150}
+        self.tree = ttk.Treeview(table_frame, columns=("code", "identity", "details", "state"), show="headings", style="Ezcan.Treeview", selectmode="browse")
+        headings = {"code": "CODE", "identity": "CARD", "details": "DETAILS", "state": "NEXT"}
+        widths = {"code": 72, "identity": 160, "details": 160, "state": 120}
         for column, title in headings.items():
             self.tree.heading(column, text=title, anchor="w")
-            self.tree.column(column, width=widths[column], anchor="w", stretch=column in {"folder", "created"})
+            self.tree.column(column, width=widths[column], anchor="w", stretch=column in {"identity", "details", "state"})
         self.tree.tag_configure("stripe_even", background=self.panel_deep, foreground=self.text)
         self.tree.tag_configure("stripe_odd", background=self.panel_alt, foreground=self.text)
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview, style="Ezcan.Vertical.TScrollbar")
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        self.tree.bind("<Double-1>", lambda _event: self.search_selected_card())
+        self.tree.bind("<<TreeviewSelect>>", self.on_card_selected)
+        self.tree.bind("<Double-1>", lambda _event: self.open_selected_card())
+        self.tree.bind("<Return>", lambda _event: self.open_selected_card())
+        return frame
+
+    def build_selected_card_workspace(self, parent: tk.Misc) -> tk.Frame:
+        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
+        heading = tk.Frame(frame, bg=self.panel)
+        heading.pack(fill="x", padx=20, pady=(18, 14))
+        tk.Frame(heading, bg=self.cyan, width=3, height=20).pack(side="left", padx=(0, 9))
+        tk.Label(heading, text="SELECTED CARD", bg=self.panel, fg=self.cyan, font=("Consolas", 11, "bold")).pack(side="left")
+        tk.Label(frame, textvariable=self.selected_card_var, bg=self.panel, fg=self.text, font=("Bahnschrift", 17, "bold"), wraplength=360, justify="left").pack(anchor="w", padx=20)
+        tk.Label(frame, textvariable=self.selected_state_var, bg=self.panel, fg=self.cyan, font=("Consolas", 9, "bold")).pack(anchor="w", padx=20, pady=(6, 0))
+        preview = tk.Frame(frame, bg=self.panel_deep, height=220, highlightthickness=1, highlightbackground=self.border)
+        preview.pack(fill="x", padx=20, pady=18)
+        preview.pack_propagate(False)
+        self.selected_preview = tk.Label(preview, text="No card selected", bg=self.panel_deep, fg=self.muted, font=("Segoe UI", 10))
+        self.selected_preview.pack(expand=True)
+        tk.Label(frame, textvariable=self.selected_details_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 10), justify="left", anchor="w", wraplength=360).pack(fill="x", padx=20)
+        actions = tk.Frame(frame, bg=self.panel)
+        actions.pack(fill="x", padx=20, pady=(22, 20))
+        self.rounded_button(actions, "SEARCH EBAY", self.search_selected_card, 142, self.green).pack(fill="x", pady=(0, 8))
+        self.rounded_button(actions, "ADD MATCH", self.record_selected_candidate, 142, self.amber, foreground=self.text).pack(fill="x", pady=(0, 8))
+        self.rounded_button(actions, "REVIEW IDENTITY", self.review_selected_matches, 142, self.cyan, foreground=self.text).pack(fill="x", pady=(0, 8))
+        self.rounded_button(actions, "MAKE DRAFT", self.create_draft_for_selected_card, 142, self.blue).pack(fill="x")
         return frame
 
     def build_pairing_panel(self, parent: tk.Misc) -> tk.Frame:
@@ -1247,31 +1318,7 @@ class DesktopWindow:
         return frame
 
     def build_cards_table(self, parent: tk.Misc) -> tk.Frame:
-        frame = tk.Frame(parent, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
-        heading = tk.Frame(frame, bg=self.panel)
-        heading.pack(fill="x", padx=20, pady=(18, 10))
-        tk.Frame(heading, bg=self.cyan, width=3, height=18).pack(side="left", padx=(0, 9))
-        tk.Label(heading, text="RECENT ARCHIVE ACTIVITY", bg=self.panel, fg=self.cyan, font=("Consolas", 11)).pack(side="left")
-        tk.Label(heading, textvariable=self.updated_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(side="right")
-        table_frame = tk.Frame(frame, bg=self.panel_deep, highlightthickness=1, highlightbackground=self.border)
-        self.tree = ttk.Treeview(
-            table_frame,
-            columns=("code", "status", "folder", "created"),
-            show="headings",
-            style="Ezcan.Treeview",
-        )
-        headings = {"code": "ARCHIVE CODE", "status": "STATUS", "folder": "FOLDER", "created": "RECEIVED"}
-        widths = {"code": 130, "status": 120, "folder": 300, "created": 150}
-        for column, title in headings.items():
-            self.tree.heading(column, text=title, anchor="w")
-            self.tree.column(column, width=widths[column], anchor="w", stretch=column in {"folder", "created"})
-        self.tree.tag_configure("stripe_even", background=self.panel_deep, foreground=self.text)
-        self.tree.tag_configure("stripe_odd", background=self.panel_alt, foreground=self.text)
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview, style="Ezcan.Vertical.TScrollbar")
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        self.tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        return frame
+        return self.build_archive_surface(parent)
 
     def refresh(self) -> None:
         cards, active_intakes, media = self.store.dashboard_stats()
@@ -1283,15 +1330,68 @@ class DesktopWindow:
         for item in self.tree.get_children():
             self.tree.delete(item)
         for index, card in enumerate(self.store.recent_cards()):
-            created = str(card["created_at"]).replace("T", " ")[:19]
+            identity = str(card["card_name"] or "Needs identity")
+            details = self.card_details_text(card)
             self.tree.insert(
                 "",
                 "end",
-                values=(card["archive_code"], str(card["status"]).upper(), card["folder_path"], created),
+                iid=str(card["archive_code"]),
+                values=(card["archive_code"], identity, details, self.card_next_action(card)),
                 tags=("stripe_even" if index % 2 == 0 else "stripe_odd",),
             )
+            if card["archive_code"] == self.selected_archive_code:
+                self.tree.selection_set(str(card["archive_code"]))
+                self.tree.focus(str(card["archive_code"]))
         self.updated_var.set(f"Updated {datetime.now().strftime('%H:%M:%S')}")
         self.root.after(1500, self.refresh)
+
+    def card_details_text(self, card: sqlite3.Row) -> str:
+        language = "English" if card["language"] == "english" else "Japanese"
+        condition = str(card["condition"] or "").replace("_", " ").title()
+        grade = f" / {card['grade_company'].upper()} {card['grade']}" if card["grade_company"] and card["grade_company"] != "none" else ""
+        return f"{language} / {condition}{grade}"
+
+    def card_next_action(self, card: sqlite3.Row) -> str:
+        state = str(card["status"])
+        if state == "received":
+            return "Search eBay"
+        if state == "searching":
+            return "Add match"
+        if state == "identified":
+            return "Make draft"
+        return state.replace("_", " ").title()
+
+    def on_card_selected(self, _event: tk.Event | None = None) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            return
+        self.selected_archive_code = str(selected[0])
+        card = self.store.card_by_archive_code(self.selected_archive_code)
+        if card is None:
+            return
+        self.selected_card_var.set(f"{card['archive_code']}  {card['card_name'] or 'Identity not confirmed'}")
+        self.selected_state_var.set(str(card["status"]).replace("_", " ").upper())
+        self.selected_details_var.set(
+            f"{self.card_details_text(card)}\n"
+            f"{card['set_name'] or 'Set not confirmed'}"
+            f"{(' / ' + str(card['card_number'])) if card['card_number'] else ''}"
+        )
+        self.selected_photo = None
+        try:
+            original = Path(card["folder_path"]) / "original"
+            image_path = next(
+                path for path in sorted(original.iterdir())
+                if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+            )
+            with Image.open(image_path) as image:
+                image.thumbnail((280, 205), Image.Resampling.LANCZOS)
+                self.selected_photo = ImageTk.PhotoImage(image.copy())
+            self.selected_preview.configure(image=self.selected_photo, text="")
+        except (FileNotFoundError, OSError, StopIteration):
+            self.selected_preview.configure(image="", text="No preview image")
+
+    def open_selected_card(self) -> None:
+        self.on_card_selected()
 
     def choose_file_for_iphone(self) -> None:
         source = filedialog.askopenfilename(
@@ -1324,7 +1424,9 @@ class DesktopWindow:
         try:
             image_path = prepare_search_image(Path(card["folder_path"]))
             search_id = self.store.start_ebay_search(card, image_path)
-            launch = open_picture_search(image_path, opener=webbrowser.open_new_tab)
+            use_profile = self.ebay_account.state()["status"] == "connected"
+            search_opener = self.ebay_account.open_url if use_profile else webbrowser.open_new_tab
+            launch = open_picture_search(image_path, opener=search_opener)
             self.store.finish_ebay_search(search_id, "awaiting_manual_upload")
             self.root.clipboard_clear()
             self.root.clipboard_append(str(launch.image_path))

@@ -15,14 +15,18 @@ Windows companion program for the Ezcan iOS capture app.
 - Permanent card folders named with the archive code.
 - SQLite records and `manifest.json` files.
 - Prepared eBay search images generated from the archived front photo.
-- Visible browser-assisted eBay picture search launch from the recent-card table.
+- Selected-card workbench with a `Recent Activity` list and no raw folder/timestamp columns.
+- Persistent visible eBay search-account sign-in under `%LOCALAPPDATA%\Ezcan\browser-profile`.
+- Visible browser-assisted eBay picture search launch from the selected-card workspace.
 - Manual eBay match recording with sold/active prices, shipping, URLs, and notes.
 - Explicit card-identity confirmation before pricing calculations.
 - Sold-comparable pricing summary with separate `$34` first-item shipping.
 - Local listing-draft JSON generated only after identity and pricing evidence are confirmed.
 - Local dashboard at `http://localhost:8765`.
 
-The eBay picture-search step opens eBay in the default browser, copies the prepared image path, and records an `awaiting_manual_upload` search session. In eBay, click the camera icon at the far right of the search field and choose that image manually. Use `ADD` to record selected sold or active results, then `REVIEW` to confirm the exact card identity. Pricing uses sold buyer-paid totals as its evidence, keeps active results separate, and subtracts `$34` only when showing the suggested one-card item price. `MAKE` writes an unpublished `generated/listing-draft.json` file with card metadata, image paths, research, suggested prices, and shipping settings. Seller credentials, CAPTCHA handling, automated result scraping, and live publishing remain outside this alpha slice.
+Use `SIGN IN / OPEN EBAY` in the left pairing panel to open a separate headed Edge, Chrome, or Brave profile for the eBay search-only account. Sign in manually in that window, then click `I'M SIGNED IN`. Ezcan stores only profile metadata and connection state, never a username, password, seller credential, or raw cookie. `REMOVE SESSION` clears the local profile. If a supported browser is not installed, Ezcan falls back to the default browser and keeps the manual flow visible.
+
+The eBay picture-search step prepares the front image, opens eBay, copies the prepared image path, and records an `awaiting_manual_upload` search session. In eBay, click the camera icon at the far right of the search field and choose that image manually. Use `ADD MATCH` to record selected sold or active results, then `REVIEW IDENTITY` to confirm the exact card identity. Pricing uses sold buyer-paid totals as its evidence, keeps active results separate, and subtracts `$34` only when showing the suggested one-card item price. `MAKE DRAFT` writes an unpublished `generated/listing-draft.json` file with card metadata, image paths, research, suggested prices, and shipping settings. CAPTCHA, two-factor challenges, automated result acceptance, seller credentials, and live publishing remain outside this release.
 
 ## Run from source
 
