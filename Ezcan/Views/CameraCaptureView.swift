@@ -58,7 +58,8 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private let guideView = CardGuideView()
     private let timerLabel = UILabel()
     private let statusLabel = UILabel()
-    private let lensControl = UISegmentedControl(items: ["AUTO", "1X", "MACRO"])
+    private let zoomControl = UISegmentedControl(items: ["1X", "2X"])
+    private let lensControl = UISegmentedControl(items: ["AUTO", "MACRO"])
     private weak var captureButton: UIButton?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var cameraDevice: AVCaptureDevice?
@@ -74,6 +75,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     private var closeUpFrames = 0
     private var standardFrames = 0
     private var nextAutomaticSwitchDate = Date.distantPast
+    private var requestedZoomFactor: CGFloat = 1
     private var pendingCropRect: CGRect?
     private var photoCaptureInFlight = false
 
@@ -186,12 +188,11 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         statusLabel.clipsToBounds = true
         view.addSubview(statusLabel)
 
-        lensControl.translatesAutoresizingMaskIntoConstraints = false
-        lensControl.selectedSegmentIndex = 0
-        lensControl.selectedSegmentTintColor = UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 1)
-        lensControl.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
-        lensControl.setTitleTextAttributes([.foregroundColor: UIColor(red: 0.01, green: 0.08, blue: 0.11, alpha: 1)], for: .selected)
+        configureSegmentedControl(zoomControl)
+        configureSegmentedControl(lensControl)
+        zoomControl.addTarget(self, action: #selector(zoomChanged), for: .valueChanged)
         lensControl.addTarget(self, action: #selector(lensModeChanged), for: .valueChanged)
+        view.addSubview(zoomControl)
         view.addSubview(lensControl)
 
         let backButton = makeButton(title: "Back", imageName: "chevron.left")
@@ -244,10 +245,6 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             statusLabel.topAnchor.constraint(equalTo: guideView.bottomAnchor, constant: 14),
             statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            lensControl.topAnchor.constraint(equalTo: timerLabel.bottomAnchor, constant: 10),
-            lensControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            lensControl.widthAnchor.constraint(equalToConstant: 206),
-            lensControl.heightAnchor.constraint(equalToConstant: 32),
             backButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
             backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
             cancelButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
@@ -258,9 +255,25 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             captureButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -50),
             captureButton.widthAnchor.constraint(equalToConstant: 76),
             captureButton.heightAnchor.constraint(equalToConstant: 76),
+            zoomControl.trailingAnchor.constraint(equalTo: captureButton.leadingAnchor, constant: -12),
+            zoomControl.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
+            zoomControl.widthAnchor.constraint(equalToConstant: 82),
+            zoomControl.heightAnchor.constraint(equalToConstant: 34),
+            lensControl.leadingAnchor.constraint(equalTo: captureButton.trailingAnchor, constant: 12),
+            lensControl.centerYAnchor.constraint(equalTo: captureButton.centerYAnchor),
+            lensControl.widthAnchor.constraint(equalToConstant: 94),
+            lensControl.heightAnchor.constraint(equalToConstant: 34),
             hint.topAnchor.constraint(equalTo: captureButton.bottomAnchor, constant: 12),
             hint.centerXAnchor.constraint(equalTo: view.centerXAnchor)
         ])
+    }
+
+    private func configureSegmentedControl(_ control: UISegmentedControl) {
+        control.translatesAutoresizingMaskIntoConstraints = false
+        control.selectedSegmentIndex = 0
+        control.selectedSegmentTintColor = UIColor(red: 0.20, green: 0.90, blue: 0.87, alpha: 1)
+        control.setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
+        control.setTitleTextAttributes([.foregroundColor: UIColor(red: 0.01, green: 0.08, blue: 0.11, alpha: 1)], for: .selected)
     }
 
     private func makeLabel(_ text: String, size: CGFloat, weight: UIFont.Weight) -> UILabel {
@@ -328,6 +341,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             self.standardCamera = camera
             self.closeUpCamera = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
             self.configureContinuousFocus(on: camera)
+            self.applyZoom(to: camera, factor: self.requestedZoomFactor)
 
             if self.mode == .video {
                 self.videoDataOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
@@ -345,7 +359,9 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                     return
                 }
                 self.session.addOutput(self.photoOutput)
-                self.photoOutput.isHighResolutionCaptureEnabled = false
+                if self.photoOutput.isHighResolutionCaptureSupported {
+                    self.photoOutput.isHighResolutionCaptureEnabled = true
+                }
             } else {
                 guard self.session.canAddOutput(self.movieOutput) else {
                     self.session.commitConfiguration()
@@ -371,7 +387,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
                 self.view.setNeedsLayout()
                 self.view.layoutIfNeeded()
                 self.setPortraitOrientation()
-                self.lensControl.isEnabled = self.closeUpCamera != nil
+                self.lensControl.setEnabled(self.closeUpCamera != nil, forSegmentAt: 1)
                 self.captureButton?.isEnabled = false
                 self.statusLabel.text = self.closeUpCamera == nil ? "Ready · Macro unavailable" : "Ready · Auto lens"
             }
@@ -395,16 +411,22 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
     }
 
     private func configureContinuousFocus(on camera: AVCaptureDevice) {
-        guard camera.isFocusModeSupported(.continuousAutoFocus) else { return }
         do {
             try camera.lockForConfiguration()
-            camera.focusMode = .continuousAutoFocus
+            if camera.isFocusModeSupported(.continuousAutoFocus) {
+                camera.focusMode = .continuousAutoFocus
+            } else if camera.isFocusModeSupported(.autoFocus) {
+                camera.focusMode = .autoFocus
+            }
             if camera.isAutoFocusRangeRestrictionSupported {
                 camera.autoFocusRangeRestriction = lensMode == .closeUp ? .near : .none
             }
             if camera.isFocusPointOfInterestSupported {
                 camera.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
                 camera.isSubjectAreaChangeMonitoringEnabled = true
+            }
+            if camera.isSmoothAutoFocusSupported {
+                camera.isSmoothAutoFocusEnabled = true
             }
             if camera.isExposureModeSupported(.continuousAutoExposure) {
                 camera.exposureMode = .continuousAutoExposure
@@ -418,12 +440,31 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         }
     }
 
+    private func applyZoom(to camera: AVCaptureDevice, factor: CGFloat) {
+        guard camera.isVideoZoomSupported else { return }
+        let clampedFactor = min(max(factor, camera.minAvailableVideoZoomFactor), camera.maxAvailableVideoZoomFactor)
+        do {
+            try camera.lockForConfiguration()
+            camera.videoZoomFactor = clampedFactor
+            camera.unlockForConfiguration()
+        } catch {
+            updateStatus("Zoom is unavailable")
+        }
+    }
+
+    @objc private func zoomChanged() {
+        requestedZoomFactor = zoomControl.selectedSegmentIndex == 1 ? 2 : 1
+        CrashReporter.shared.record("Zoom changed to \(Int(requestedZoomFactor))X")
+        sessionQueue.async { [weak self] in
+            guard let self, let camera = self.cameraDevice else { return }
+            self.applyZoom(to: camera, factor: self.requestedZoomFactor)
+        }
+    }
+
     @objc private func lensModeChanged() {
         let selectedMode: LensMode
         switch lensControl.selectedSegmentIndex {
         case 1:
-            selectedMode = .standard
-        case 2:
             selectedMode = .closeUp
         default:
             selectedMode = .automatic
@@ -442,9 +483,6 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         switch selectedMode {
         case .automatic:
             updateStatus("Auto lens · watching focus")
-            switchCameraIfNeeded(to: false)
-        case .standard:
-            updateStatus("Standard camera · 1X")
             switchCameraIfNeeded(to: false)
         case .closeUp:
             updateStatus("Macro camera · close focus")
@@ -477,6 +515,7 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             self.cameraInput = targetInput
             self.cameraDevice = targetCamera
             self.configureContinuousFocus(on: targetCamera)
+            self.applyZoom(to: targetCamera, factor: self.requestedZoomFactor)
             self.session.commitConfiguration()
             self.nextAutomaticSwitchDate = Date().addingTimeInterval(1.2)
 
@@ -594,8 +633,11 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
             } else {
                 settings = AVCapturePhotoSettings()
             }
-            settings.isHighResolutionPhotoEnabled = false
+            settings.isHighResolutionPhotoEnabled = self.photoOutput.isHighResolutionCaptureEnabled
             settings.photoQualityPrioritization = self.photoOutput.maxPhotoQualityPrioritization
+            if #available(iOS 16.0, *) {
+                settings.maxPhotoDimensions = self.photoOutput.maxPhotoDimensions
+            }
             if let connection = self.photoOutput.connection(with: .video), connection.isVideoStabilizationSupported {
                 connection.preferredVideoStabilizationMode = .auto
             }
@@ -712,28 +754,71 @@ final class GuidedCameraController: UIViewController, AVCapturePhotoCaptureDeleg
         }
     }
 
+    private static let outputLongEdge = 1600
+
     private static func processPhotoData(_ data: Data, cropRect: CGRect?) -> Data? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+        guard let source = CGImageSourceCreateWithData(data as CFData, [
+                  kCGImageSourceShouldCache: false
+              ] as CFDictionary),
+              let sourceProperties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let sourceWidth = sourceProperties[kCGImagePropertyPixelWidth] as? Int,
+              let sourceHeight = sourceProperties[kCGImagePropertyPixelHeight] as? Int,
               let image = CGImageSourceCreateThumbnailAtIndex(
                 source,
                 0,
                 [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 2400
+                    kCGImageSourceShouldCache: false,
+                    kCGImageSourceThumbnailMaxPixelSize: thumbnailMaxPixelSize(
+                        width: sourceWidth,
+                        height: sourceHeight,
+                        cropRect: cropRect
+                    )
                 ] as CFDictionary
               ) else { return nil }
 
         let croppedImage = crop(image, to: cropRect)
+        let outputImage = resize(croppedImage, toLongEdge: outputLongEdge)
         let output = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(
             destination,
-            croppedImage,
-            [kCGImageDestinationLossyCompressionQuality: 0.94] as CFDictionary
+            outputImage,
+            [kCGImageDestinationLossyCompressionQuality: 0.98] as CFDictionary
         )
         guard CGImageDestinationFinalize(destination) else { return nil }
         return output as Data
+    }
+
+    private static func thumbnailMaxPixelSize(width: Int, height: Int, cropRect: CGRect?) -> Int {
+        guard let cropRect else { return outputLongEdge }
+        let cropWidth = CGFloat(width) * cropRect.width
+        let cropHeight = CGFloat(height) * cropRect.height
+        let cropLongEdge = max(cropWidth, cropHeight)
+        guard cropLongEdge > 1 else { return outputLongEdge }
+        let sourceLongEdge = CGFloat(max(width, height))
+        return max(outputLongEdge, Int(ceil(CGFloat(outputLongEdge) * sourceLongEdge / cropLongEdge)))
+    }
+
+    private static func resize(_ image: CGImage, toLongEdge longEdge: Int) -> CGImage {
+        let sourceLongEdge = max(image.width, image.height)
+        guard sourceLongEdge > 0, sourceLongEdge != longEdge else { return image }
+        let scale = CGFloat(longEdge) / CGFloat(sourceLongEdge)
+        let width = max(1, Int((CGFloat(image.width) * scale).rounded()))
+        let height = max(1, Int((CGFloat(image.height) * scale).rounded()))
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage() ?? image
     }
 
     private static func crop(_ image: CGImage, to normalizedRect: CGRect?) -> CGImage {
