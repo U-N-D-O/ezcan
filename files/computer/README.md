@@ -27,6 +27,7 @@ Windows companion program for the Ezcan iOS capture app.
 - Visible browser-assisted eBay picture search launch from the selected-card workspace.
 - Manual eBay match recording with sold/active prices, shipping, URLs, and notes.
 - Saved comparable rows can open their listing URL in the separate visible eBay profile when connected.
+- Comparable URLs are limited to HTTPS eBay hosts before they can be saved or opened.
 - Explicit card-identity confirmation before pricing calculations.
 - Sold-comparable pricing summary with separate `$34` first-item shipping.
 - Local listing-draft JSON generated only after identity and pricing evidence are confirmed, with local review/edit/approve/reject/regenerate controls.

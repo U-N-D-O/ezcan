@@ -593,6 +593,19 @@ def test_ebay_candidate_rejects_invalid_listing_url(tmp_path: Path) -> None:
         raise AssertionError("Expected invalid candidate data to fail")
 
 
+def test_ebay_candidate_rejects_non_ebay_https_host(tmp_path: Path) -> None:
+    store = Store(tmp_path / "data")
+    try:
+        store.add_ebay_candidate(
+            "missing-search",
+            {"market_status": "active", "title": "Wrong host", "item_url": "https://example.com/item"},
+        )
+    except ValueError as error:
+        assert "eBay listing URL" in str(error)
+    else:
+        raise AssertionError("Expected a non-eBay host to fail")
+
+
 def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path) -> None:
     app = create_app(tmp_path / "data")
     client = TestClient(app)

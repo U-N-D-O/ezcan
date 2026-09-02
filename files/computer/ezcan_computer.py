@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import urlparse
 
 import qrcode
 from PIL import Image, ImageTk
@@ -77,6 +78,12 @@ def safe_file_name(value: str) -> str:
     cleaned = "".join(character for character in candidate if character.isalnum() or character in ".-_ ")
     cleaned = cleaned.strip().replace(" ", "_")
     return cleaned[:120] or "upload.bin"
+
+
+def is_ebay_url(value: str) -> bool:
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and (host == "ebay.com" or host.endswith(".ebay.com"))
 
 
 def file_sha256(path: Path) -> str:
@@ -730,7 +737,7 @@ class Store:
         item_url = str(candidate.get("item_url", "")).strip()
         if not title:
             raise ValueError("A candidate title is required")
-        if not item_url.startswith(("http://", "https://")):
+        if not is_ebay_url(item_url):
             raise ValueError("A valid eBay listing URL is required")
         try:
             price = float(candidate.get("price", 0))
@@ -1998,7 +2005,7 @@ class DesktopWindow:
                 return
             values = candidate_tree.item(selected_candidate[0], "values")
             item_url = str(values[5]) if len(values) > 5 else ""
-            if not item_url:
+            if not is_ebay_url(item_url):
                 messagebox.showinfo("Open eBay Listing", "That comparable has no saved listing URL.", parent=dialog)
                 return
             opener = self.ebay_account.open_url if self.ebay_account.state()["status"] == "connected" else webbrowser.open_new_tab
