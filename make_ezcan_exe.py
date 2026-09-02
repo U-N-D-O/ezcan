@@ -7,10 +7,11 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-SOURCE_FILE = PROJECT_ROOT / "computer" / "ezcan_computer.py"
-ICON_FILE = PROJECT_ROOT / "icons" / "ezcan_logo.ico"
-DIST_DIR = PROJECT_ROOT / "dist"
-BUILD_DIR = PROJECT_ROOT / "build"
+FILES_DIR = PROJECT_ROOT / "files"
+SOURCE_FILE = FILES_DIR / "computer" / "ezcan_computer.py"
+ICON_FILE = FILES_DIR / "icons" / "ezcan_logo.ico"
+DIST_DIR = PROJECT_ROOT
+BUILD_DIR = FILES_DIR / "build"
 
 
 def run_build() -> int:

@@ -21,3 +21,7 @@ dist/
 
 # Downloaded build artifacts
 artifacts/
+
+# Local Windows program output and receiver data
+/EzcanComputer.exe
+/Archive/

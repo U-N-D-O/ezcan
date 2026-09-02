@@ -5,7 +5,7 @@ Ezcan is a Pokemon card workflow with two parts:
 - An iOS capture app that sends one card's photos and optional video over the same private Wi-Fi network.
 - A Windows computer program that receives, archives, and later researches cards for eBay listing drafts.
 
-The iOS app is in the repository root. The Windows companion program is in `computer/`.
+The iOS app is in `files/Ezcan/`. The Windows companion program is in `files/computer/`.
 
 The iOS app uses `ezcan_logo.png` as its bundled welcome-screen logo.
 
@@ -28,11 +28,12 @@ This repository uses [XcodeGen](https://github.com/yonaskolb/XcodeGen) so the pr
 
 ```bash
 brew install xcodegen
+cd files
 xcodegen generate
 open Ezcan.xcodeproj
 ```
 
-The project targets iOS 17 or newer and uses the bundle identifier `com.undu.ezcan` by default. The iOS app icon is registered as `AppIcon` from `icons/ios`. Change the bundle identifier and signing team in `project.yml` before distributing the app.
+The project targets iOS 17 or newer and uses the bundle identifier `com.undu.ezcan` by default. The iOS app icon is registered as `AppIcon` from `files/icons/ios`. Change the bundle identifier and signing team in `files/project.yml` before distributing the app.
 
 ## GitHub Actions
 
@@ -40,7 +41,7 @@ The workflow at `.github/workflows/build-ios.yml` builds an arm64 iOS IPA on eve
 
 ### One-command IPA build
 
-The easiest Windows option is the double-clickable Python GUI [build_ios_ipa.pyw](build_ios_ipa.pyw). It needs only Python, Git, and the GitHub CLI. Double-click the file, press **ACTIVATE BUILD**, and it will show a progress dial and activity log while it commits/pushes changes, runs the macOS build, downloads the `ezcan-ios-ipa` artifact, and displays a completion alert. Authenticate the GitHub CLI once with `gh auth login`.
+The easiest Windows option is the double-clickable Python GUI [build_ios_ipa.pyw](../build_ios_ipa.pyw). It needs only Python, Git, and the GitHub CLI. Double-click the file, press **ACTIVATE BUILD**, and it will show a progress dial and activity log while it commits/pushes changes, runs the macOS build, downloads the `ezcan-ios-ipa` artifact, and displays a completion alert. Authenticate the GitHub CLI once with `gh auth login`.
 
 The downloaded `Ezcan-unsigned.ipa` is placed under `artifacts\ios`. When the worktree is clean, the GUI starts a manual build of the current `main` automatically.
 
@@ -49,7 +50,7 @@ For command-line use, the PowerShell version remains available:
 On Windows, [build-ios-ipa.ps1](build-ios-ipa.ps1) stages and commits the current changes, pushes `main`, waits for the matching macOS GitHub Actions build, downloads the `ezcan-ios-ipa` artifact, displays a progress bar, and shows a completion alert. Authenticate the GitHub CLI once with `gh auth login`, then run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build-ios-ipa.ps1 -CommitMessage "Build latest Ezcan IPA"
+powershell -ExecutionPolicy Bypass -File .\files\build-ios-ipa.ps1 -CommitMessage "Build latest Ezcan IPA"
 ```
 
 If there are no local changes, add `-RunEvenIfClean`. The script refuses to stage paths that look like secrets or signing files. The IPA remains unsigned and must be installed through AltStore or AltServer.
@@ -108,8 +109,8 @@ Run it from source with Windows PowerShell:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r computer\requirements.txt
-python computer\ezcan_computer.py
+python -m pip install -r files\computer\requirements.txt
+python files\computer\ezcan_computer.py
 ```
 
 The program opens its own desktop window and quietly keeps the private phone connection running in the background. The phone and computer must be on the same private Wi-Fi network. By default, data is stored beside the running program in `Archive\` and each card gets its own folder under `Archive\Cards\`. Set `EZCAN_DATA_DIR` to override this location.
@@ -119,7 +120,7 @@ To transfer the IPA without email, download the direct `.ipa` from the latest re
 Build the executable locally:
 
 ```powershell
-python -m PyInstaller --clean --noconfirm --onefile --windowed --name EzcanComputer --icon icons\ezcan_logo.ico computer\ezcan_computer.py
+python make_ezcan_exe.py --no-pause
 ```
 
-Build `EzcanComputer.exe` locally on the Windows computer with the command above. eBay Picture Search, market research, and listing-draft screens are the next computer-program phase.
+Build `EzcanComputer.exe` locally on the Windows computer with the command above. The output is placed at the repository root. eBay Picture Search, market research, and listing-draft screens are the next computer-program phase.

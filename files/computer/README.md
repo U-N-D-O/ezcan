@@ -25,9 +25,9 @@ From the repository root on Windows:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r computer\requirements.txt
+python -m pip install -r files\computer\requirements.txt
 $env:EZCAN_NO_BROWSER = "1"
-python computer\ezcan_computer.py
+python files\computer\ezcan_computer.py
 ```
 
 Open the displayed address in a browser. The iPhone and computer must be on the same private Wi-Fi network. Do not use router port forwarding.
@@ -37,10 +37,10 @@ Data is stored in `%LOCALAPPDATA%\Ezcan` on Windows. Set `EZCAN_DATA_DIR` to cho
 ## Build the executable locally
 
 ```powershell
-python -m PyInstaller --clean --noconfirm --onefile --name EzcanComputer --icon icons\ezcan_logo.ico computer\ezcan_computer.py
+python make_ezcan_exe.py --no-pause
 ```
 
-The executable is created at `dist\EzcanComputer.exe`.
+The executable is created at the repository root as `EzcanComputer.exe`.
 
 ## GitHub Actions
 
