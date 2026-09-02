@@ -30,7 +30,7 @@ Windows companion program for the Ezcan iOS capture app.
 - Versioned SQLite initialization with backup-before-migration and interrupted-finalization recovery.
 - Local dashboard at `http://localhost:8765`.
 
-If a finalization is interrupted, the intake is recovered when possible. A move that needs manual attention appears in `Recent Activity` as `Recovery required` with `Archive move interrupted`; no eBay or draft action is run for that row.
+If a finalization is interrupted, the intake is recovered when possible. A move that needs manual attention appears in `Recent Activity` as `Recovery required` with `Archive move interrupted`; the selected-card workspace offers `REPAIR ARCHIVE` once the expected archive folder has been restored, and no eBay or draft action is run until repair succeeds.
 
 Use `SIGN IN / OPEN EBAY` in the left pairing panel to open a separate headed Edge, Chrome, or Brave profile for the eBay search-only account. Sign in manually in that window, then click `I'M SIGNED IN`. Ezcan stores only profile metadata and connection state, never a username, password, seller credential, or raw cookie. A connected state automatically falls back to `login_required` if that profile is removed. `REMOVE SESSION` clears the local profile. If a supported browser is not installed, Ezcan falls back to the default browser and keeps the manual flow visible.
 

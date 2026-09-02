@@ -45,6 +45,7 @@ def test_card_action_availability_follows_workflow_state() -> None:
         "pricing": False,
         "make_draft": False,
         "review_draft": False,
+        "repair": False,
     }
     assert card_action_availability("received", False)["search"] is True
     assert card_action_availability("received", False)["match"] is False
@@ -57,6 +58,7 @@ def test_card_action_availability_follows_workflow_state() -> None:
     assert card_action_availability("identified", True)["review_draft"] is True
     assert card_action_availability("identified", True)["make_draft"] is False
     assert card_action_availability("recovery_required", False)["search"] is False
+    assert card_action_availability("recovery_required", False)["repair"] is True
 
 
 def test_listing_draft_evidence_text_surfaces_stored_market_assumptions() -> None:
@@ -167,6 +169,30 @@ def test_recovery_required_intake_is_visible_in_recent_activity(tmp_path: Path) 
     recovery = next(item for item in activity if item["archive_code"] == archive_code)
     assert recovery["status"] == "recovery_required"
     assert recovery["folder_path"].endswith(f"uploading-{intake_id}")
+
+
+def test_repair_recovery_rebuilds_card_when_archive_folder_returns(tmp_path: Path) -> None:
+    root = tmp_path / "archive"
+    store = Store(root)
+    intake_id, temporary_path, archive_code = store.create_intake(None)
+    image_path = temporary_path / "original" / "front.jpg"
+    image_path.write_bytes(b"repair-card")
+    store.add_media(intake_id, "front.jpg", image_path, "image", hashlib.sha256(b"repair-card").hexdigest(), 11)
+    with store.connection() as connection:
+        connection.execute("UPDATE intakes SET status = 'recovery_required' WHERE intake_id = ?", (intake_id,))
+
+    final_path = store.cards / archive_code
+    (final_path / "original").mkdir(parents=True)
+    (final_path / "original" / "front.jpg").write_bytes(b"repair-card")
+    shutil.rmtree(temporary_path)
+
+    repaired = store.repair_recovery(archive_code)
+
+    assert repaired["archive_code"] == archive_code
+    assert store.intake(intake_id)["status"] == "finalized"
+    assert store.card_by_archive_code(archive_code)["status"] == "received"
+    assert (final_path / "manifest.json").is_file()
+    assert store.media(intake_id)[0]["file_path"] == str(final_path / "original" / "front.jpg")
 
 
 def test_archive_codes_increment_in_storage_order() -> None:

@@ -130,7 +130,7 @@ def validate_card_details(details: dict[str, str]) -> dict[str, str]:
 
 def card_action_availability(status: str | None, has_draft: bool) -> dict[str, bool]:
     if status is None or status == "recovery_required":
-        return {key: False for key in ("search", "match", "identity", "pricing", "make_draft", "review_draft")}
+        return {key: status == "recovery_required" if key == "repair" else False for key in ("search", "match", "identity", "pricing", "make_draft", "review_draft", "repair")}
     return {
         "search": status in {"received", "searching", "identified", "researched"},
         "match": status in {"searching", "identified", "researched"},
@@ -138,6 +138,7 @@ def card_action_availability(status: str | None, has_draft: bool) -> dict[str, b
         "pricing": status in {"identified", "researched"},
         "make_draft": status in {"identified", "researched"} and not has_draft,
         "review_draft": status in {"identified", "researched"} and has_draft,
+        "repair": False,
     }
 
 
@@ -671,6 +672,24 @@ class Store:
                 "SELECT * FROM intakes WHERE archive_code = ? AND status = 'recovery_required'",
                 (archive_code,),
             ).fetchone()
+
+    def repair_recovery(self, archive_code: str) -> sqlite3.Row:
+        recovery = self.recovery_by_archive_code(archive_code)
+        if recovery is None:
+            raise ValueError("That archive row no longer needs recovery")
+        final_path = self.cards / archive_code
+        if not final_path.is_dir():
+            raise ValueError(f"The recovered archive folder is still missing: {final_path}")
+        with self.connection() as connection:
+            connection.execute(
+                "UPDATE intakes SET status = 'finalizing' WHERE intake_id = ?",
+                (recovery["intake_id"],),
+            )
+        self._recover_interrupted_finalizations()
+        card = self.card_by_archive_code(archive_code)
+        if card is None:
+            raise ValueError("Ezcan could not rebuild the recovered card record")
+        return card
 
     def start_ebay_search(self, card: sqlite3.Row, image_path: Path) -> str:
         search_id = str(uuid.uuid4())
@@ -1506,6 +1525,7 @@ class DesktopWindow:
             ("pricing", "RESEARCH PRICES", self.research_prices_for_selected_card, self.green, "white"),
             ("make_draft", "MAKE DRAFT", self.create_draft_for_selected_card, self.blue, "white"),
             ("review_draft", "REVIEW DRAFT", self.review_draft_for_selected_card, self.magenta, "white"),
+            ("repair", "REPAIR ARCHIVE", self.repair_selected_card, self.amber, self.text),
         )
         for index, (key, label, command, color, foreground) in enumerate(action_specs):
             button = self.rounded_button(actions, label, command, 142, color, foreground=foreground)
@@ -1729,7 +1749,7 @@ class DesktopWindow:
                 self.selected_photos = []
                 self.selected_preview_front.configure(image="", text="FRONT\nArchive recovery needed")
                 self.selected_preview_back.configure(image="", text="BACK\nArchive recovery needed")
-            self.update_card_actions(None)
+            self.update_card_actions(recovery)
             return
         self.update_card_actions(card)
         self.selected_card_var.set(f"{card['archive_code']}  {card['card_name'] or 'Identity not confirmed'}")
@@ -1763,6 +1783,21 @@ class DesktopWindow:
 
     def open_selected_card(self) -> None:
         self.on_card_selected()
+
+    def repair_selected_card(self) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("Repair Archive", "Select a recovery-required row first.")
+            return
+        archive_code = str(selected[0])
+        try:
+            self.store.repair_recovery(archive_code)
+        except ValueError as error:
+            messagebox.showinfo("Repair Archive", str(error))
+            return
+        self.research_var.set(f"{archive_code}: archive repaired")
+        self.refresh()
+        messagebox.showinfo("Repair Archive", f"Archive {archive_code} was rebuilt and is ready for eBay research.")
 
     def choose_file_for_iphone(self) -> None:
         source = filedialog.askopenfilename(
