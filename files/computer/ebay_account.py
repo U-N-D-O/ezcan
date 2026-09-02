@@ -38,6 +38,9 @@ class EbayAccountManager:
         status = str(data.get("status", "login_required"))
         if status not in {"not_connected", "login_required", "connected"}:
             status = "login_required"
+        if status == "connected" and not self.profile_path.is_dir():
+            status = "login_required"
+            self._write_state(status)
         return {"status": status, "profilePath": str(self.profile_path)}
 
     def begin_sign_in(

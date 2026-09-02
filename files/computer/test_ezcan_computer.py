@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -29,6 +30,8 @@ def test_ebay_account_profile_stores_state_without_credentials(tmp_path: Path) -
 
     manager.mark_connected()
     assert manager.state()["status"] == "connected"
+    shutil.rmtree(manager.profile_path)
+    assert manager.state()["status"] == "login_required"
     manager.remove_profile()
     assert manager.state()["status"] == "not_connected"
     assert not manager.profile_path.exists()
