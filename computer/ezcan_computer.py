@@ -32,6 +32,19 @@ MAX_VIDEO_BYTES = 300 * 1024 * 1024
 MAX_SHARED_FILE_BYTES = 1024 * 1024 * 1024
 
 
+def pairing_qr_image(payload: str, target_pixels: int):
+    qr = qrcode.QRCode(
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=1,
+        border=4,
+    )
+    qr.add_data(payload)
+    qr.make(fit=True)
+    total_modules = qr.modules_count + (qr.border * 2)
+    qr.box_size = max(1, target_pixels // total_modules)
+    return qr.make_image(fill_color="black", back_color="white")
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -364,7 +377,7 @@ def create_app(data_root: Path | None = None) -> FastAPI:
     @app.get("/pairing/qr")
     async def pairing_qr(request: Request) -> StreamingResponse:
         payload = json.dumps(pairing_payload(request), separators=(",", ":"))
-        image = qrcode.make(payload)
+        image = pairing_qr_image(payload, target_pixels=420)
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         buffer.seek(0)
@@ -605,7 +618,7 @@ class DesktopWindow:
             },
             separators=(",", ":"),
         )
-        image = qrcode.make(payload)
+        image = pairing_qr_image(payload, target_pixels=208)
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         self.qr_photo = tk.PhotoImage(data=base64.b64encode(buffer.getvalue()).decode("ascii"))
