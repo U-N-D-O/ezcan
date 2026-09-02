@@ -50,6 +50,7 @@ struct CardCaptureFlowView: View {
     @State private var nameCounts: [String: Int] = [:]
     @State private var isBusy = false
     @State private var statusMessage: String?
+    @State private var completionError: String?
     @State private var sharedFilesPresented = false
     @State private var hasStarted = false
     @State private var cardGeneration = 0
@@ -414,6 +415,19 @@ struct CardCaptureFlowView: View {
                     .disabled(!ArchiveCodeRules.isValid(archiveCode) || isBusy)
                 }
                 .frame(maxWidth: 520)
+                if let completionError {
+                    VStack(spacing: 10) {
+                        statusBanner("Archive failed: \(completionError)")
+                        Button {
+                            Task { await finishCard() }
+                        } label: {
+                            Label("Retry archive", systemImage: "arrow.clockwise.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(EzcanSecondaryButtonStyle())
+                        .frame(maxWidth: 520)
+                    }
+                }
             }
             .padding(.vertical, 18)
         }
@@ -707,6 +721,7 @@ struct CardCaptureFlowView: View {
     private func finishCard() async {
         guard let intakeID, let pairing = pairingStore.pairing else { return }
         isBusy = true
+        completionError = nil
         do {
             let details = IntakeListingDetails(
                 language: isEnglishCard ? "english" : "japanese",
@@ -721,13 +736,14 @@ struct CardCaptureFlowView: View {
             )
             await MainActor.run {
                 isBusy = false
+                completionError = nil
                 deleteCachedFrontPhoto()
                 phase = .complete(receipt.archiveCode)
             }
         } catch {
             await MainActor.run {
                 isBusy = false
-                statusMessage = "Upload failed: \(error.localizedDescription)"
+                completionError = error.localizedDescription
             }
         }
     }
@@ -754,6 +770,7 @@ struct CardCaptureFlowView: View {
         nameCounts = [:]
         isBusy = false
         statusMessage = nil
+        completionError = nil
         frontPhotoURL = nil
         hasStarted = false
         isCameraDismissing = false
