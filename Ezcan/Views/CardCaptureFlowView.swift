@@ -225,14 +225,10 @@ struct CardCaptureFlowView: View {
                         .font(.subheadline)
                         .foregroundStyle(EzcanTheme.muted)
                 }
-                EzcanInstrumentRing(progress: min(1, Double(capturedMedia.count) / 4.0), accent: EzcanTheme.green) {
-                    VStack(spacing: 6) {
-                        Text("\(capturedMedia.count)")
-                            .font(.system(size: 36, weight: .black, design: .rounded))
-                            .foregroundStyle(EzcanTheme.ink)
-                        Text("MEDIA READY")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .foregroundStyle(EzcanTheme.muted)
+                EzcanInstrumentRing(progress: captureProgress, accent: captureProgressIsComplete ? EzcanTheme.green : EzcanTheme.cyan) {
+                    CaptureProgressButton(isComplete: captureProgressIsComplete) {
+                        guard captureProgressIsComplete else { return }
+                        phase = .naming
                     }
                 }
                 VStack(spacing: 13) {
@@ -271,6 +267,23 @@ struct CardCaptureFlowView: View {
         .ezcanPanel()
         .padding(.horizontal, 22)
         .padding(.bottom, 18)
+    }
+
+    private var captureProgress: Double {
+        let frontCaptured = capturedMedia.contains { $0.fileName.lowercased().hasPrefix("front") }
+        let backCaptured = capturedMedia.contains { $0.fileName.lowercased().hasPrefix("back") }
+        let additionalCount = capturedMedia.filter { $0.fileName.lowercased().hasPrefix("additional") }.count
+        let videoCaptured = capturedMedia.contains { $0.kind == .video }
+        var completedSteps = 0
+        completedSteps += frontCaptured ? 1 : 0
+        completedSteps += backCaptured ? 1 : 0
+        completedSteps += min(additionalCount, 2)
+        completedSteps += videoCaptured ? 1 : 0
+        return Double(completedSteps) / 5.0
+    }
+
+    private var captureProgressIsComplete: Bool {
+        captureProgress >= 1
     }
 
     private func summaryMetric(value: String, label: String, color: Color) -> some View {

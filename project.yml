@@ -15,6 +15,7 @@ targets:
       - path: Ezcan
     resources:
       - path: ezcan_logo.png
+      - path: Ezcan/Assets.xcassets
       - path: Ezcan/Resources/LaunchScreen.storyboard
     settings:
       base:

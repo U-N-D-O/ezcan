@@ -163,6 +163,51 @@ struct EzcanInstrumentRing<Content: View>: View {
     }
 }
 
+struct CaptureProgressButton: View {
+    let isComplete: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(isComplete ? EzcanTheme.greenSoft : EzcanTheme.cyanSoft)
+                    .frame(width: 94, height: 94)
+                    .overlay {
+                        Circle()
+                            .stroke(EzcanTheme.line, lineWidth: 1)
+                    }
+                    .shadow(color: EzcanTheme.shadow, radius: 5, x: 2, y: 3)
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: isComplete
+                                ? [EzcanTheme.green.opacity(0.92), EzcanTheme.green]
+                                : [EzcanTheme.blue, EzcanTheme.cyan],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 78, height: 78)
+                    .overlay {
+                        Circle()
+                            .stroke(isComplete ? EzcanTheme.green.opacity(0.75) : EzcanTheme.blue.opacity(0.75), lineWidth: 1)
+                    }
+                    .shadow(color: EzcanTheme.ink.opacity(0.3), radius: 2, y: 3)
+                Image(isComplete ? "finish" : "scan")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 34, height: 34)
+                    .shadow(color: .black.opacity(0.28), radius: 2, y: 2)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!isComplete)
+        .accessibilityLabel(isComplete ? "Continue to archive code" : "Capture progress")
+        .accessibilityHint(isComplete ? "Double tap to continue" : "Complete the remaining card media steps")
+    }
+}
+
 struct EzcanSoftControl<Content: View>: View {
     let tint: Color
     let content: Content
