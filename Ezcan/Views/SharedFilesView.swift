@@ -3,6 +3,7 @@ import UIKit
 
 struct SharedFilesView: View {
     @EnvironmentObject private var pairingStore: PairingStore
+    @EnvironmentObject private var sharedFileMonitor: SharedFileMonitor
     @Environment(\.dismiss) private var dismiss
     @State private var files: [SharedFile] = []
     @State private var isLoading = false
@@ -95,8 +96,8 @@ struct SharedFilesView: View {
             }
             .alert(item: $receivedFile) { file in
                 Alert(
-                    title: Text("File received"),
-                    message: Text("\(file.fileName) is ready. Open it in the Files app or dismiss this message."),
+                    title: Text("File downloaded"),
+                    message: Text("\(file.fileName) is ready in the Files app."),
                     primaryButton: .default(Text("Open in Files")) {
                         shareItem = ShareItem(url: file.url)
                     },
@@ -104,6 +105,15 @@ struct SharedFilesView: View {
                 )
             }
             .task { await refresh() }
+            .onAppear {
+                sharedFileMonitor.isFilesPageVisible = true
+            }
+            .onDisappear {
+                sharedFileMonitor.isFilesPageVisible = false
+            }
+            .onChange(of: sharedFileMonitor.files) { _, newFiles in
+                files = newFiles
+            }
             .sheet(item: $shareItem) { item in
                 ShareSheet(fileURL: item.url)
             }

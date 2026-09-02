@@ -619,6 +619,7 @@ class DesktopWindow:
         foreground: str = "white",
     ) -> tk.Canvas:
         height = 52
+        state = {"pressed": False}
         button = tk.Canvas(
             parent,
             width=width,
@@ -638,17 +639,28 @@ class DesktopWindow:
 
         def paint() -> None:
             button.delete("all")
-            rounded_shape(2, 6, width - 2, height - 1, "#b8c4d0")
-            rounded_shape(0, 2, width - 4, height - 5, "#654358", "#654358")
-            rounded_shape(3, 5, width - 7, height - 8, "#170928")
-            rounded_shape(5, 7, width - 9, height - 10, "#1d0d33")
-            rounded_shape(5, 7, width - 9, height // 2, "#654358")
-            rounded_shape(5, height // 2 - 1, width - 9, height - 10, "#170928")
-            button.create_text(width // 2 - 7, height // 2 - 2, text=text, fill=foreground, font=("Segoe UI", 10, "bold"), tags="label")
-            button.create_text(width - 22, height // 2 - 2, text="→", fill=foreground, font=("Segoe UI", 16, "bold"), tags="icon")
+            offset = 3 if state["pressed"] else 0
+            rounded_shape(2, 6 + offset, width - 2, height - 1 + offset, "#b8c4d0")
+            rounded_shape(0, 2 + offset, width - 4, height - 5 + offset, "#654358", "#654358")
+            rounded_shape(3, 5 + offset, width - 7, height - 8 + offset, "#170928")
+            rounded_shape(5, 7 + offset, width - 9, height - 10 + offset, "#1d0d33")
+            rounded_shape(5, 7 + offset, width - 9, height // 2 + offset, "#654358")
+            rounded_shape(5, height // 2 - 1 + offset, width - 9, height - 10 + offset, "#170928")
+            button.create_text(width // 2 - 7, height // 2 - 2 + offset, text=text, fill=foreground, font=("Segoe UI", 10, "bold"), tags="label")
+            button.create_text(width - 22, height // 2 - 2 + offset, text="→", fill=foreground, font=("Segoe UI", 16, "bold"), tags="icon")
+
+        def press(_event: tk.Event) -> None:
+            state["pressed"] = True
+            paint()
+
+        def release(_event: tk.Event) -> None:
+            state["pressed"] = False
+            paint()
+            command()
 
         paint()
-        button.bind("<Button-1>", lambda _event: command())
+        button.bind("<ButtonPress-1>", press)
+        button.bind("<ButtonRelease-1>", release)
         return button
 
     def build_layout(self) -> None:
