@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102a2b">
+  <title>Pocket Drop</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div class="brand-mark" aria-hidden="true">PD</div>
+      <div>
+        <p class="eyebrow">LOCAL FILE TRANSFER</p>
+        <h1>Pocket Drop</h1>
+      </div>
+      <span id="connection-pill" class="status-pill">Connecting</span>
+    </header>
+
+    <section id="desktop-view" class="view" hidden>
+      <div class="intro-row">
+        <div>
+          <p class="eyebrow">COMPUTER CONSOLE</p>
+          <h2>Your receiving desk</h2>
+          <p class="lede">Send photos, videos, documents, and anything else from your phone over your private Wi-Fi.</p>
+        </div>
+        <div class="counter" aria-live="polite"><strong id="file-count">0</strong><span>files received</span></div>
+      </div>
+
+      <section class="share-panel">
+        <div>
+          <p class="eyebrow">PHONE LINK</p>
+          <p id="phone-url" class="share-url">Loading secure link...</p>
+        </div>
+        <button id="copy-link" class="button button-dark" type="button">Copy link</button>
+      </section>
+
+      <section class="files-section">
+        <div class="section-heading">
+          <h2>Received files</h2>
+          <button id="refresh-files" class="icon-button" type="button" title="Refresh files" aria-label="Refresh files">↻</button>
+        </div>
+        <div id="file-list" class="file-list"></div>
+      </section>
+    </section>
+
+    <section id="phone-view" class="view" hidden>
+      <div class="phone-heading">
+        <p class="eyebrow">PHONE TO COMPUTER</p>
+        <h2>Drop it here.</h2>
+        <p class="lede">Choose one or more files. They will appear in the computer's receiving folder.</p>
+      </div>
+
+      <label id="drop-zone" class="drop-zone" for="file-input">
+        <span class="drop-icon" aria-hidden="true">↑</span>
+        <span class="drop-title">Choose files</span>
+        <span class="drop-hint">or drag them into this window</span>
+        <input id="file-input" type="file" multiple>
+      </label>
+      <div id="upload-list" class="upload-list" aria-live="polite"></div>
+    </section>
+
+    <section id="missing-view" class="view missing-view" hidden>
+      <p class="eyebrow">POCKET DROP</p>
+      <h2>Use the link from the computer.</h2>
+      <p class="lede">Start the server on the computer, then open the printed phone link here.</p>
+    </section>
+
+    <footer>
+      <span>Private Wi-Fi only</span>
+      <span id="save-location"></span>
+    </footer>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
