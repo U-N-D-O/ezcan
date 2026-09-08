@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ebay import open_picture_search
 from ebay_account import EbayAccountManager
-from image_processor import IMAGE_SUFFIXES, find_back_image, find_front_image, prepare_search_image
+from image_processor import IMAGE_SUFFIXES, add_shipping_overlay, find_back_image, find_front_image, prepare_search_image
 from listing_drafts import build_listing_draft
 from pricing import PricingRecommendation, recommend_price
 
@@ -841,13 +841,21 @@ class Store:
             raise ValueError("Confirm the card identity before creating a listing draft")
         recommendation = self.market_recommendation(archive_code)
         card_folder = Path(card["folder_path"])
-        image_paths = [
-            str(path)
+        original_images = [
+            path
             for path in sorted((card_folder / "original").iterdir())
             if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
         ]
-        if not image_paths:
+        if not original_images:
             raise ValueError("At least one archived card image is required")
+        front_image = find_front_image(card_folder)
+        image_paths = [str(front_image)] + [str(path) for path in original_images if path != front_image]
+        image_paths[0] = str(
+            add_shipping_overlay(
+                Path(image_paths[0]),
+                card_folder / "generated" / "listing-first.jpg",
+            )
+        )
         draft = build_listing_draft(dict(card), recommendation, image_paths)
         draft_path = card_folder / "generated" / "listing-draft.json"
         draft_path.parent.mkdir(parents=True, exist_ok=True)

@@ -10,7 +10,7 @@ from PIL import Image
 from ebay import open_picture_search
 from ebay_account import EbayAccountManager
 from ezcan_computer import Store, card_action_availability, create_app, default_data_root, increment_archive_code, listing_draft_evidence_text, program_directory
-from image_processor import find_back_image, prepare_search_image
+from image_processor import add_shipping_overlay, find_back_image, prepare_search_image
 from pricing import recommend_price
 
 
@@ -478,6 +478,20 @@ def test_prepare_search_image_prefers_front_and_writes_generated_jpeg(tmp_path: 
         assert image.size == (1000, 1400)
 
 
+def test_add_shipping_overlay_writes_a_same_size_listing_copy(tmp_path: Path) -> None:
+    source = tmp_path / "front.jpg"
+    destination = tmp_path / "generated" / "listing-first.jpg"
+    Image.new("RGB", (1000, 1400), "white").save(source)
+
+    add_shipping_overlay(source, destination)
+
+    assert destination.is_file()
+    with Image.open(destination) as image:
+        assert image.format == "JPEG"
+        assert image.size == (1000, 1400)
+        assert image.getpixel((500, 1200)) != (255, 255, 255)
+
+
 def test_prepare_search_image_fails_without_an_original_image(tmp_path: Path) -> None:
     card_folder = tmp_path / "Cards" / "A0A0"
     (card_folder / "original").mkdir(parents=True)
@@ -668,6 +682,7 @@ def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path)
     assert client.post(f"/api/intakes/{intake_id}/media", headers=media_headers, content=content).status_code == 200
     archive_code = client.post(f"/api/intakes/{intake_id}/complete", headers=headers, json={}).json()["archiveCode"]
     card = app.state.store.card_by_archive_code(archive_code)
+    Image.new("RGB", (320, 420), "white").save(Path(card["folder_path"]) / "original" / "front.jpg")
     search_id = app.state.store.start_ebay_search(card, Path(card["folder_path"]) / "generated" / "ebay-search.jpg")
     app.state.store.add_ebay_candidate(
         search_id,
@@ -726,7 +741,8 @@ def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path)
     assert draft["shipping"] == {"firstItemCharge": "34.00", "additionalItemsCharge": "0.00"}
     assert draft["researchStatus"] == "current"
     assert draft["publishing"] == {"published": False, "sellerCredentialsUsed": False}
-    assert str(Path(card["folder_path"]) / "original" / "front.jpg") in draft["imagePaths"]
+    assert str(Path(card["folder_path"]) / "generated" / "listing-first.jpg") == draft["imagePaths"][0]
+    assert (Path(card["folder_path"]) / "original" / "front.jpg").is_file()
     assert listing["status"] == "draft"
     assert Path(listing["draft_path"]) == draft_path
 
