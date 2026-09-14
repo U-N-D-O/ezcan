@@ -10,8 +10,8 @@ Ezcan moves a card from iPhone capture to a Windows archive, visible eBay resear
 - Archive folders use sequential four-character codes such as `A0A0`.
 - eBay research uses a separate search-only account in a visible browser session.
 - Sold and active evidence remain separate, and competitor shipping is included in buyer totals.
-- Owner shipping is `$34 USD` for the first card and `$0` for additional cards.
-- Listing drafts remain local and unpublished. Seller OAuth and live publishing are out of scope.
+- Owner shipping is `$35 USD` flat-rate shipping for domestic and international orders.
+- Listing drafts are prepared locally first, then can be published from the computer after seller OAuth and fixed policy validation.
 
 ## Desktop experience
 
@@ -41,7 +41,7 @@ Identity confirmation is explicit and records card name, set, number, edition, p
 
 ## Pricing and drafts
 
-Pricing keeps sold evidence separate from active competition and includes competitor item price plus competitor shipping. Recommendations show card price, buyer-paid total, estimated fees, and the `$34` first-item shipping rule independently.
+Pricing keeps sold evidence separate from active competition and includes competitor item price plus competitor shipping. Recommendations show card price, buyer-paid total, estimated fees, and the `$35` flat-rate shipping rule independently.
 
 A local draft contains factual title, description, item specifics, images, research evidence, shipping, fees, and profit assumptions. Draft review must remain local and support review, edit, approve locally, reject, and regenerate actions. Every draft is marked unpublished.
 

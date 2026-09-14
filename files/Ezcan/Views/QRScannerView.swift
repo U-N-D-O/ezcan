@@ -3,11 +3,25 @@ import SwiftUI
 import UIKit
 
 struct QRScannerView: UIViewControllerRepresentable {
+    let title: String
+    let instruction: String
     let onPayload: (String) -> Void
     let onCancel: () -> Void
 
+    init(
+        title: String = "Scan Ezcan Computer",
+        instruction: String = "Point at the QR code shown on the computer",
+        onPayload: @escaping (String) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.title = title
+        self.instruction = instruction
+        self.onPayload = onPayload
+        self.onCancel = onCancel
+    }
+
     func makeCoordinator() -> Coordinator {
-        Coordinator(onPayload: onPayload, onCancel: onCancel)
+        Coordinator(title: title, instruction: instruction, onPayload: onPayload, onCancel: onCancel)
     }
 
     func makeUIViewController(context: Context) -> QRScannerController {
@@ -17,10 +31,14 @@ struct QRScannerView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: QRScannerController, context: Context) {}
 
     final class Coordinator: NSObject {
+        let title: String
+        let instruction: String
         let onPayload: (String) -> Void
         let onCancel: () -> Void
 
-        init(onPayload: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+        init(title: String, instruction: String, onPayload: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+            self.title = title
+            self.instruction = instruction
             self.onPayload = onPayload
             self.onCancel = onCancel
         }
@@ -78,7 +96,7 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
 
         let title = UILabel()
         title.translatesAutoresizingMaskIntoConstraints = false
-        title.text = "Scan Ezcan Computer"
+        title.text = coordinator.title
         title.textColor = UIColor(red: 0.07, green: 0.12, blue: 0.16, alpha: 1)
         title.font = .systemFont(ofSize: 22, weight: .bold)
         title.textAlignment = .center
@@ -86,7 +104,7 @@ final class QRScannerController: UIViewController, AVCaptureMetadataOutputObject
 
         let instruction = UILabel()
         instruction.translatesAutoresizingMaskIntoConstraints = false
-        instruction.text = "Point at the QR code shown on the computer"
+        instruction.text = coordinator.instruction
         instruction.textColor = UIColor(red: 0.34, green: 0.42, blue: 0.47, alpha: 1)
         instruction.font = .systemFont(ofSize: 15, weight: .medium)
         instruction.textAlignment = .center

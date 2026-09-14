@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import json
 import os
 import secrets
@@ -25,21 +26,27 @@ import qrcode
 from PIL import Image, ImageTk
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from ebay import open_picture_search
 from ebay_account import EbayAccountManager
+from ebay_api import ComputerRefreshTokenStore, EbayConfig, EbayIntegrationError, EbayOAuth, EbaySellClient
+from ebay_browser import EbayBrowserError, EbayBrowserWorker, VisualMatch
+from archive_labels import build_label_sheet
+from description_templates import infer_product_template, product_template_choices, product_template_key, render_product_template
 from image_processor import IMAGE_SUFFIXES, add_shipping_overlay, find_back_image, find_front_image, prepare_search_image
-from listing_drafts import build_listing_draft
+from listing_drafts import STORE_CATEGORIES, VIDEO_SUFFIXES, build_listing_draft, enforce_condition_disclaimer
+from description_html import fill_store_branding, render_description_template
+from store_branding import branding_asset_paths, required_description_assets
 from pricing import PricingRecommendation, recommend_price
 
 
 SEQUENTIAL_ARCHIVE_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 SEQUENTIAL_ARCHIVE_DIGITS = "0123456789"
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
-MAX_VIDEO_BYTES = 300 * 1024 * 1024
+MAX_VIDEO_BYTES = 150 * 1024 * 1024
 MAX_SHARED_FILE_BYTES = 1024 * 1024 * 1024
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 5
 SUPPORTED_LANGUAGES = {"japanese", "english"}
 SUPPORTED_CONDITIONS = {"near_mint", "excellent", "very_good", "good", "played", "poor", "graded"}
 SUPPORTED_GRADING_COMPANIES = {"none", "psa", "bgs", "cgc", "other"}
@@ -205,6 +212,27 @@ class Store:
         connection.row_factory = sqlite3.Row
         return connection
 
+    @property
+    def branding_urls_path(self) -> Path:
+        return self.root / "store-branding-urls.json"
+
+    def load_branding_urls(self) -> dict[str, str]:
+        try:
+            payload = json.loads(self.branding_urls_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            str(key): str(value)
+            for key, value in payload.items()
+            if isinstance(key, str) and isinstance(value, str) and value.lower().startswith("https://")
+        }
+
+    def save_branding_urls(self, urls: dict[str, str]) -> None:
+        self.branding_urls_path.parent.mkdir(parents=True, exist_ok=True)
+        self.branding_urls_path.write_text(json.dumps(urls, indent=2), encoding="utf-8")
+
     def _initialize_database(self) -> None:
         existing_database = self.database_path.is_file() and self.database_path.stat().st_size > 0
         needs_backup = False
@@ -283,6 +311,22 @@ class Store:
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     latest_code TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS archive_label_batches (
+                    batch_id TEXT PRIMARY KEY,
+                    requested_count INTEGER NOT NULL,
+                    start_code TEXT NOT NULL,
+                    end_code TEXT NOT NULL,
+                    codes_json TEXT NOT NULL,
+                    output_path TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS archive_labels (
+                    archive_code TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    batch_id TEXT REFERENCES archive_label_batches(batch_id),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS ebay_searches (
                     search_id TEXT PRIMARY KEY,
                     internal_id TEXT NOT NULL,
@@ -322,7 +366,14 @@ class Store:
                     suggested_price_low REAL NOT NULL,
                     suggested_price_high REAL NOT NULL,
                     shipping_price REAL NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    ebay_sku TEXT,
+                    ebay_offer_id TEXT,
+                    ebay_listing_id TEXT,
+                    ebay_publish_status TEXT NOT NULL DEFAULT 'not_started',
+                    ebay_publish_error TEXT,
+                    ebay_image_urls_json TEXT,
+                    ebay_published_at TEXT
                 );
                 """
             )
@@ -338,6 +389,18 @@ class Store:
             intake_columns = {row[1] for row in connection.execute("PRAGMA table_info(intakes)")}
             if "details_json" not in intake_columns:
                 connection.execute("ALTER TABLE intakes ADD COLUMN details_json TEXT")
+            listing_columns = {row[1] for row in connection.execute("PRAGMA table_info(listings)")}
+            for name, definition in (
+                ("ebay_sku", "TEXT"),
+                ("ebay_offer_id", "TEXT"),
+                ("ebay_listing_id", "TEXT"),
+                ("ebay_publish_status", "TEXT NOT NULL DEFAULT 'not_started'"),
+                ("ebay_publish_error", "TEXT"),
+                ("ebay_image_urls_json", "TEXT"),
+                ("ebay_published_at", "TEXT"),
+            ):
+                if name not in listing_columns:
+                    connection.execute(f"ALTER TABLE listings ADD COLUMN {name} {definition}")
             connection.execute(
                 "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -633,22 +696,136 @@ class Store:
 
     def new_archive_code(self) -> str:
         with self.connection() as connection:
+            printed = connection.execute(
+                "SELECT archive_code FROM archive_labels WHERE status = 'printed' ORDER BY created_at, archive_code LIMIT 1"
+            ).fetchone()
+            if printed is not None:
+                code = str(printed["archive_code"])
+                connection.execute(
+                    "UPDATE archive_labels SET status = 'assigned', updated_at = ? WHERE archive_code = ?",
+                    (utc_now(), code),
+                )
+                return code
+
             row = connection.execute("SELECT latest_code FROM archive_sequence WHERE id = 1").fetchone()
-        candidate = "A0A0" if row is None else increment_archive_code(str(row["latest_code"]))
-        with self.connection() as connection:
+            candidate = "A0A0" if row is None else increment_archive_code(str(row["latest_code"]))
             for _ in range(26 * 10 * 26 * 10):
                 exists = connection.execute(
-                    "SELECT 1 FROM cards WHERE archive_code = ? OR archive_code IN (SELECT archive_code FROM intakes WHERE archive_code = ?)",
-                    (candidate, candidate),
+                    """
+                    SELECT 1 FROM cards WHERE archive_code = ?
+                    UNION ALL SELECT 1 FROM intakes WHERE archive_code = ?
+                    UNION ALL SELECT 1 FROM archive_labels WHERE archive_code = ?
+                    """,
+                    (candidate, candidate, candidate),
                 ).fetchone()
                 if exists is None:
+                    now = utc_now()
                     connection.execute(
                         "INSERT INTO archive_sequence (id, latest_code) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET latest_code = excluded.latest_code",
                         (candidate,),
                     )
+                    connection.execute(
+                        "INSERT INTO archive_labels (archive_code, status, batch_id, created_at, updated_at) VALUES (?, 'assigned', NULL, ?, ?)",
+                        (candidate, now, now),
+                    )
                     return candidate
                 candidate = increment_archive_code(candidate)
         raise RuntimeError("Could not generate a unique archive code")
+
+    def reserve_label_batch(self, count: int) -> tuple[str, list[str]]:
+        if count < 1 or count > 1000:
+            raise ValueError("Choose between 1 and 1000 labels")
+        batch_id = f"labels-{uuid.uuid4()}"
+        codes: list[str] = []
+        with self.connection() as connection:
+            pending = connection.execute(
+                "SELECT start_code, end_code FROM archive_label_batches b WHERE EXISTS (SELECT 1 FROM archive_labels l WHERE l.batch_id = b.batch_id AND l.status = 'printed') ORDER BY b.created_at LIMIT 1"
+            ).fetchone()
+            if pending is not None:
+                raise ValueError(
+                    f"Finish the earlier label session {pending['start_code']} - {pending['end_code']} first, or use its Reprint Remaining button."
+                )
+            row = connection.execute("SELECT latest_code FROM archive_sequence WHERE id = 1").fetchone()
+            candidate = "A0A0" if row is None else increment_archive_code(str(row["latest_code"]))
+            for _ in range(count):
+                for _ in range(26 * 10 * 26 * 10):
+                    exists = connection.execute(
+                        """
+                        SELECT 1 FROM cards WHERE archive_code = ?
+                        UNION ALL SELECT 1 FROM intakes WHERE archive_code = ?
+                        UNION ALL SELECT 1 FROM archive_labels WHERE archive_code = ?
+                        """,
+                        (candidate, candidate, candidate),
+                    ).fetchone()
+                    if exists is None:
+                        break
+                    candidate = increment_archive_code(candidate)
+                else:
+                    raise RuntimeError("Could not reserve a unique archive ID")
+                codes.append(candidate)
+                candidate = increment_archive_code(candidate)
+
+            now = utc_now()
+            connection.execute(
+                "INSERT INTO archive_label_batches (batch_id, requested_count, start_code, end_code, codes_json, output_path, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)",
+                (batch_id, count, codes[0], codes[-1], json.dumps(codes), now),
+            )
+            connection.executemany(
+                "INSERT INTO archive_labels (archive_code, status, batch_id, created_at, updated_at) VALUES (?, 'printed', ?, ?, ?)",
+                [(code, batch_id, now, now) for code in codes],
+            )
+            connection.execute(
+                "INSERT INTO archive_sequence (id, latest_code) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET latest_code = excluded.latest_code",
+                (codes[-1],),
+            )
+        return batch_id, codes
+
+    def label_batches(self) -> list[sqlite3.Row]:
+        with self.connection() as connection:
+            return connection.execute(
+                """
+                SELECT b.*, SUM(CASE WHEN l.status = 'assigned' THEN 1 ELSE 0 END) AS assigned_count,
+                       SUM(CASE WHEN l.status = 'printed' THEN 1 ELSE 0 END) AS remaining_count
+                FROM archive_label_batches b
+                LEFT JOIN archive_labels l ON l.batch_id = b.batch_id
+                GROUP BY b.batch_id
+                ORDER BY b.created_at DESC
+                """
+            ).fetchall()
+
+    def reprint_label_batch(self, batch_id: str) -> list[str]:
+        """Return the unassigned tail of a session for one-click reprinting."""
+        with self.connection() as connection:
+            batch = connection.execute(
+                "SELECT * FROM archive_label_batches WHERE batch_id = ?", (batch_id,)
+            ).fetchone()
+            if batch is None:
+                raise ValueError("That label session no longer exists")
+            codes = json.loads(str(batch["codes_json"]))
+            if not isinstance(codes, list) or not all(isinstance(code, str) for code in codes):
+                raise ValueError("That label session is invalid")
+            labels = connection.execute(
+                "SELECT archive_code, status FROM archive_labels WHERE batch_id = ? ORDER BY created_at, archive_code",
+                (batch_id,),
+            ).fetchall()
+            status_by_code = {str(row["archive_code"]): str(row["status"]) for row in labels}
+            first_remaining = next(
+                (index for index, code in enumerate(codes) if status_by_code.get(code) == "printed"),
+                len(codes),
+            )
+            remaining = codes[first_remaining:]
+            if any(status_by_code.get(code) != "printed" for code in remaining):
+                raise ValueError("This session is not sequentially used; automatic reprinting was stopped for safety")
+            if not remaining:
+                raise ValueError("This session has no unused labels remaining")
+            return remaining
+
+    def record_label_batch_file(self, batch_id: str, output_path: Path) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                "UPDATE archive_label_batches SET output_path = ? WHERE batch_id = ?",
+                (str(output_path), batch_id),
+            )
 
     def recent_cards(self) -> list[sqlite3.Row]:
         with self.connection() as connection:
@@ -713,7 +890,7 @@ class Store:
         return search_id
 
     def finish_ebay_search(self, search_id: str, status: str, error: str | None = None) -> None:
-        if status not in {"awaiting_manual_upload", "failed"}:
+        if status not in {"awaiting_manual_upload", "matches_found", "match_selected", "sell_draft_ready", "failed"}:
             raise ValueError("Unsupported eBay search status")
         now = utc_now()
         with self.connection() as connection:
@@ -904,12 +1081,59 @@ class Store:
                 (archive_code,),
             ).fetchone()
 
-    def update_listing_draft(self, archive_code: str, title: str, description: str) -> Path:
+    def update_ebay_publish_state(
+        self,
+        archive_code: str,
+        status: str,
+        *,
+        offer_id: str | None = None,
+        listing_id: str | None = None,
+        image_urls: list[str] | None = None,
+        error: str | None = None,
+    ) -> None:
+        if status not in {"not_started", "publishing", "published", "failed"}:
+            raise ValueError("Unsupported eBay publish status")
+        listing = self.latest_listing_draft(archive_code)
+        if listing is None:
+            raise ValueError("Create a local listing draft first")
+        with self.connection() as connection:
+            connection.execute(
+                """UPDATE listings SET ebay_sku = COALESCE(ebay_sku, ?),
+                    ebay_offer_id = COALESCE(?, ebay_offer_id),
+                    ebay_listing_id = COALESCE(?, ebay_listing_id),
+                    ebay_publish_status = ?, ebay_publish_error = ?,
+                    ebay_image_urls_json = COALESCE(?, ebay_image_urls_json),
+                    ebay_published_at = CASE WHEN ? = 'published' THEN ? ELSE ebay_published_at END
+                    WHERE listing_id = ?""",
+                (
+                    archive_code,
+                    offer_id,
+                    listing_id,
+                    status,
+                    error,
+                    json.dumps(image_urls) if image_urls is not None else None,
+                    status,
+                    utc_now(),
+                    listing["listing_id"],
+                ),
+            )
+
+    def update_listing_draft(
+        self,
+        archive_code: str,
+        title: str,
+        description: str,
+        *,
+        card_name: str | None = None,
+        store_category: str | None = None,
+        product_type: str | None = None,
+        price: str | float | None = None,
+    ) -> Path:
         listing = self.latest_listing_draft(archive_code)
         if listing is None:
             raise ValueError("Create a local listing draft first")
         title = title.strip()
-        description = description.strip()
+        description = enforce_condition_disclaimer(description)
         if not title or not description:
             raise ValueError("Draft title and description are required")
         draft_path = Path(listing["draft_path"])
@@ -919,6 +1143,38 @@ class Store:
             raise ValueError("The local draft file could not be read") from error
         draft["title"] = title
         draft["description"] = description
+        if card_name is not None:
+            clean_card_name = card_name.strip()
+            if not clean_card_name:
+                raise ValueError("Card name is required")
+            draft.setdefault("itemSpecifics", {})["cardName"] = clean_card_name
+        if store_category is not None:
+            if store_category not in STORE_CATEGORIES:
+                raise ValueError("Choose a valid Sugimori Gem Archive category")
+            draft["storeCategory"] = store_category
+            draft["category"] = store_category
+        if product_type is not None:
+            draft["productType"] = product_template_key(product_type)
+        if price is not None:
+            try:
+                numeric_price = float(str(price).strip())
+            except (TypeError, ValueError) as error:
+                raise ValueError("Listing price must be a number") from error
+            if numeric_price <= 0:
+                raise ValueError("Listing price must be greater than zero")
+            draft["listingPrice"] = f"{numeric_price:.2f}"
+            draft["priceConfirmed"] = True
+        else:
+            # Saving the review without a replacement price explicitly accepts
+            # the draft's suggested amount (legacy callers use this path too).
+            draft["priceConfirmed"] = True
+        draft["descriptionHtml"] = render_description_template(
+            archive_code=archive_code,
+            title=title,
+            body=description,
+            card_name=str(draft.get("itemSpecifics", {}).get("cardName", "")),
+            store_category=str(draft.get("storeCategory", "Non-TCG")),
+        )
         draft["reviewStatus"] = "reviewed"
         draft["publishing"] = {"published": False, "sellerCredentialsUsed": False}
         draft_path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
@@ -940,6 +1196,8 @@ class Store:
             draft = json.loads(draft_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError("The local draft file could not be read") from error
+        if status == "approved" and draft.get("priceConfirmed") is not True:
+            raise ValueError("Confirm the suggested price or enter a manual price before approval")
         draft["reviewStatus"] = status
         draft["publishing"] = {"published": False, "sellerCredentialsUsed": False}
         draft_path.write_text(json.dumps(draft, indent=2), encoding="utf-8")
@@ -1055,6 +1313,9 @@ def create_app(data_root: Path | None = None) -> FastAPI:
     app.state.store = store
     app.state.token = token
     app.state.port = int(os.environ.get("EZCAN_PORT", "8765"))
+    app.state.ebay_oauth = EbayOAuth(EbayConfig.from_environment(), ComputerRefreshTokenStore())
+    app.state.ebay_sell = EbaySellClient(app.state.ebay_oauth)
+    app.state.ebay_oauth_state: str | None = None
 
     def require_token(request: Request) -> None:
         authorization = request.headers.get("authorization", "")
@@ -1076,6 +1337,44 @@ def create_app(data_root: Path | None = None) -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/ebay/status")
+    async def ebay_status() -> dict[str, object]:
+        """Computer UI status only; the phone app never needs eBay credentials."""
+        oauth = app.state.ebay_oauth
+        configured = oauth.config.configured
+        connected = False
+        if configured:
+            try:
+                connected = bool(oauth.token_store.load())
+            except Exception:
+                connected = False
+        return {
+            "configured": configured,
+            "connected": connected,
+            "publishingConfigured": oauth.config.publishing_configured,
+            "marketplaceId": oauth.config.marketplace_id,
+            "environment": oauth.config.environment,
+            "browserRequiredForListings": False,
+        }
+
+    @app.get("/ebay/oauth/callback")
+    async def ebay_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None) -> HTMLResponse:
+        """Receive the one-time seller consent redirect on the computer."""
+        oauth = app.state.ebay_oauth
+        expected_state = app.state.ebay_oauth_state
+        if error:
+            app.state.ebay_oauth_state = None
+            return HTMLResponse(f"<h2>eBay connection cancelled</h2><p>{html.escape(error)}</p><p>You can close this window.</p>", status_code=400)
+        if not code or not state or not expected_state or not hmac.compare_digest(state, expected_state):
+            return HTMLResponse("<h2>eBay connection could not be verified</h2><p>Return to Ezcan and start the connection again.</p>", status_code=400)
+        try:
+            oauth.exchange_authorization_code(code)
+        except Exception as callback_error:
+            app.state.ebay_oauth_state = None
+            return HTMLResponse(f"<h2>eBay connection failed</h2><p>{html.escape(str(callback_error))}</p><p>You can close this window.</p>", status_code=502)
+        app.state.ebay_oauth_state = None
+        return HTMLResponse("<h2>eBay connected to Sugimori Gem Archive</h2><p>You may close this window and return to Ezcan.</p>")
 
     @app.get("/api/pairing")
     async def pairing(request: Request) -> dict[str, object]:
@@ -1225,9 +1524,13 @@ class DesktopWindow:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.address = f"http://{computer_ip()}:{application.state.port}"
         self.ebay_account = EbayAccountManager()
+        self.ebay_oauth: EbayOAuth = application.state.ebay_oauth
+        self.ebay_sell: EbaySellClient = application.state.ebay_sell
+        self.ebay_browser: EbayBrowserWorker | None = None
         self.address_var = tk.StringVar(value=self.address)
         self.connection_var = tk.StringVar(value="ONLINE - PRIVATE NETWORK")
         self.ebay_account_var = tk.StringVar(value="eBay search account: not connected")
+        self.ebay_publish_var = tk.StringVar(value="eBay seller API: checking connection")
         self.archive_var = tk.StringVar(value=str(self.store.root))
         self.transfer_var = tk.StringVar(value="No files queued")
         self.cards_var = tk.StringVar(value="0")
@@ -1416,6 +1719,7 @@ class DesktopWindow:
         utilities.pack(fill="x", pady=(0, 20))
         tk.Label(utilities, text="UTILITIES", bg=self.background, fg=self.muted, font=("Consolas", 8, "bold")).pack(side="left", padx=(0, 12))
         self.rounded_button(utilities, "OPEN ARCHIVE", self.open_archive, 142, self.blue).pack(side="left", padx=(0, 10))
+        self.rounded_button(utilities, "PRINT ID LABELS", self.print_archive_labels, 158, self.cyan, foreground=self.text).pack(side="left", padx=(0, 10))
         self.rounded_button(utilities, "SEND TO IPHONE", self.choose_file_for_iphone, 158, self.magenta).pack(side="left")
 
         workspace = tk.Frame(shell, bg=self.background)
@@ -1463,7 +1767,10 @@ class DesktopWindow:
         self.rounded_button(content, "COPY ADDRESS", lambda: self.copy_text(self.address), 172, self.blue).pack(anchor="w", pady=(16, 0))
         ebay = tk.Frame(content, bg=self.panel, highlightthickness=1, highlightbackground=self.border)
         ebay.pack(fill="x", pady=(28, 0))
-        tk.Label(ebay, text="EBAY SEARCH ACCOUNT", bg=self.panel, fg=self.magenta, font=("Consolas", 9, "bold")).pack(anchor="w", padx=14, pady=(14, 3))
+        tk.Label(ebay, text="EBAY SELLER ACCESS", bg=self.panel, fg=self.magenta, font=("Consolas", 9, "bold")).pack(anchor="w", padx=14, pady=(14, 3))
+        tk.Label(ebay, textvariable=self.ebay_publish_var, bg=self.panel, fg=self.text, font=("Segoe UI", 9), wraplength=230, justify="left").pack(anchor="w", padx=14)
+        self.rounded_button(ebay, "CONNECT SELLER API", self.connect_ebay_seller, 190, self.cyan, foreground=self.text).pack(anchor="w", padx=14, pady=(10, 7))
+        tk.Label(ebay, text="PICTURE-SEARCH ACCOUNT", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w", padx=14, pady=(4, 2))
         tk.Label(ebay, textvariable=self.ebay_account_var, bg=self.panel, fg=self.text, font=("Segoe UI", 9), wraplength=230, justify="left").pack(anchor="w", padx=14)
         self.rounded_button(ebay, "SIGN IN / OPEN EBAY", self.connect_ebay_account, 190, self.magenta).pack(anchor="w", padx=14, pady=(12, 7))
         controls = tk.Frame(ebay, bg=self.panel)
@@ -1471,7 +1778,56 @@ class DesktopWindow:
         tk.Button(controls, text="I'M SIGNED IN", command=self.confirm_ebay_account, relief="flat", cursor="hand2").pack(side="left")
         tk.Button(controls, text="REMOVE SESSION", command=self.remove_ebay_account, relief="flat", cursor="hand2").pack(side="right")
         self.refresh_ebay_account_status()
+        self.refresh_ebay_publish_status()
         return frame
+
+    def refresh_ebay_publish_status(self) -> None:
+        if not self.ebay_oauth.config.configured:
+            self.ebay_publish_var.set("eBay seller API: developer setup required")
+            return
+        try:
+            connected = bool(self.ebay_oauth.token_store.load())
+        except Exception:
+            connected = False
+        if connected:
+            if self.ebay_oauth.config.publishing_configured:
+                self.ebay_publish_var.set(f"eBay seller API: ready ({self.ebay_oauth.config.marketplace_id}) | browser not needed")
+            else:
+                self.ebay_publish_var.set("eBay seller API: connected; listing settings still required")
+        else:
+            self.ebay_publish_var.set("eBay seller API: connect this computer once")
+
+    def connect_ebay_seller(self) -> None:
+        try:
+            state = secrets.token_urlsafe(24)
+            self.application.state.ebay_oauth_state = state
+            authorization_url = self.ebay_oauth.authorization_url(state)
+            if not webbrowser.open_new_tab(authorization_url):
+                raise OSError("The eBay authorization page could not be opened")
+        except Exception as error:
+            self.application.state.ebay_oauth_state = None
+            messagebox.showerror(
+                "eBay Seller API",
+                f"Could not start the one-time eBay authorization.\n\n{error}\n\n"
+                "The computer needs EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, and EBAY_RU_NAME configured first.",
+            )
+            return
+        self.ebay_publish_var.set("eBay authorization opened once; finish it, then return here")
+        self.root.after(1500, self.poll_ebay_seller_connection)
+
+    def poll_ebay_seller_connection(self) -> None:
+        if self.closing:
+            return
+        try:
+            connected = bool(self.ebay_oauth.token_store.load())
+        except Exception:
+            connected = False
+        if connected:
+            self.refresh_ebay_publish_status()
+            messagebox.showinfo("eBay Seller API", "This computer is connected. Listings will publish directly through eBay without opening a browser.")
+            return
+        if self.application.state.ebay_oauth_state:
+            self.root.after(1500, self.poll_ebay_seller_connection)
 
     def refresh_ebay_account_status(self) -> None:
         status = self.ebay_account.state()["status"]
@@ -1880,23 +2236,148 @@ class DesktopWindow:
         try:
             image_path = prepare_search_image(Path(card["folder_path"]))
             search_id = self.store.start_ebay_search(card, image_path)
-            use_profile = self.ebay_account.state()["status"] == "connected"
-            search_opener = self.ebay_account.open_url if use_profile else webbrowser.open_new_tab
-            launch = open_picture_search(image_path, opener=search_opener)
-            self.store.finish_ebay_search(search_id, "awaiting_manual_upload")
-            self.root.clipboard_clear()
-            self.root.clipboard_append(str(launch.image_path))
-            self.research_var.set(f"{archive_code}: browser opened; image path copied")
-            messagebox.showinfo(
-                "eBay Picture Search",
-                "eBay is open. Click the camera icon in the search field, choose browse to a file, and select:\n\n"
-                f"{launch.image_path}\n\nThe image path is also copied to the clipboard.",
-            )
-        except (OSError, FileNotFoundError, ValueError) as error:
+            if self.ebay_account.state()["status"] != "connected":
+                raise EbayBrowserError("Connect the dedicated computer eBay profile once before using automatic visual search.")
+            if self.ebay_browser is None:
+                self.ebay_browser = EbayBrowserWorker(
+                    self.ebay_account.profile_path,
+                    browser_path=self.ebay_account._browser_executable(),
+                )
+            self.research_var.set(f"{archive_code}: eBay visual search running")
+            threading.Thread(
+                target=self._run_visual_search,
+                args=(archive_code, search_id, image_path),
+                daemon=True,
+                name="ezcan-visual-search",
+            ).start()
+            return
+        except (OSError, FileNotFoundError, ValueError, EbayBrowserError) as error:
             if search_id is not None:
                 self.store.finish_ebay_search(search_id, "failed", str(error))
             self.research_var.set(f"{archive_code}: search preparation failed")
             messagebox.showerror("eBay Picture Search", f"Could not prepare the search.\n\n{error}")
+
+    def _run_visual_search(self, archive_code: str, search_id: str, image_path: Path) -> None:
+        try:
+            if self.ebay_browser is None:
+                raise EbayBrowserError("The eBay page session is not available.")
+            matches = self.ebay_browser.visual_search(image_path)
+        except Exception as error:
+            self.root.after(0, self._visual_search_failed, archive_code, search_id, error)
+            return
+        self.root.after(0, self._visual_search_finished, archive_code, search_id, matches)
+
+    def _visual_search_failed(self, archive_code: str, search_id: str, error: Exception) -> None:
+        self.store.finish_ebay_search(search_id, "failed", str(error))
+        self.research_var.set(f"{archive_code}: visual search failed")
+        messagebox.showerror("eBay Visual Search", str(error))
+
+    def _visual_search_finished(self, archive_code: str, search_id: str, matches: list[VisualMatch]) -> None:
+        self.store.finish_ebay_search(search_id, "matches_found")
+        self.research_var.set(f"{archive_code}: choose 1 of {len(matches)} visual matches")
+        self.show_visual_matches(archive_code, search_id, matches)
+
+    def show_visual_matches(self, archive_code: str, search_id: str, matches: list[VisualMatch]) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"eBay Visual Matches - {archive_code}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("900x530")
+        dialog.minsize(720, 430)
+        body = tk.Frame(dialog, bg=self.panel, padx=24, pady=20)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text=f"EBAY VISUAL MATCHES  //  {archive_code}", bg=self.panel, fg=self.cyan, font=("Consolas", 11, "bold")).pack(anchor="w")
+        tk.Label(body, text="Select the exact product. Ezcan will then activate eBay's 'Sell one like this' page and upload the archive media.", bg=self.panel, fg=self.text, font=("Bahnschrift", 15, "bold"), wraplength=820, justify="left").pack(anchor="w", pady=(5, 16))
+        match_list = ttk.Treeview(body, columns=("rank", "title", "url"), show="headings", height=8, style="Ezcan.Treeview")
+        match_list.heading("rank", text="#")
+        match_list.heading("title", text="VISUAL MATCH")
+        match_list.heading("url", text="EBAY URL")
+        match_list.column("rank", width=45, anchor="center", stretch=False)
+        match_list.column("title", width=470, anchor="w")
+        match_list.column("url", width=300, anchor="w")
+        for match in matches[:5]:
+            match_list.insert("", "end", iid=str(match.rank), values=(match.rank, match.title, match.url))
+        match_list.pack(fill="both", expand=True)
+
+        def use_selected() -> None:
+            selection = match_list.selection()
+            if not selection:
+                messagebox.showinfo("Choose Visual Match", "Select one of the five eBay matches first.", parent=dialog)
+                return
+            match = next((item for item in matches if str(item.rank) == selection[0]), None)
+            if match is None:
+                return
+            dialog.destroy()
+            self.use_visual_match(archive_code, search_id, match)
+
+        actions = tk.Frame(body, bg=self.panel)
+        actions.pack(fill="x", pady=(16, 0))
+        tk.Button(actions, text="USE SELECTED MATCH", command=use_selected, bg=self.cyan, fg=self.text, relief="flat", padx=14, pady=7, cursor="hand2").pack(side="left")
+        tk.Button(actions, text="CLOSE", command=dialog.destroy, relief="flat", padx=14, pady=7, cursor="hand2").pack(side="right")
+        match_list.selection_set("1")
+        dialog.bind("<Return>", lambda _event: use_selected())
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.focus_force()
+
+    def use_visual_match(self, archive_code: str, search_id: str, match: VisualMatch) -> None:
+        card = self.store.card_by_archive_code(archive_code)
+        if card is None:
+            return
+        try:
+            self.store.add_ebay_candidate(
+                search_id,
+                {
+                    "market_status": "active",
+                    "item_url": match.url,
+                    "title": match.title,
+                    "price": 0,
+                    "shipping_price": 0,
+                    "listing_format": "visual_match",
+                    "seller_notes": "Selected from automatic eBay visual search",
+                },
+            )
+            self.store.finish_ebay_search(search_id, "match_selected")
+            if self.ebay_browser is None:
+                raise EbayBrowserError("The eBay page session is not available.")
+            card_folder = Path(card["folder_path"])
+            files = [
+                path
+                for path in sorted((card_folder / "original").iterdir())
+                if path.is_file() and (path.suffix.lower() in IMAGE_SUFFIXES or path.suffix.lower() in VIDEO_SUFFIXES)
+            ]
+            self.research_var.set(f"{archive_code}: opening Sell one like this")
+            threading.Thread(
+                target=self._run_sell_one_like_this,
+                args=(archive_code, search_id, match, files),
+                daemon=True,
+                name="ezcan-sell-one-like-this",
+            ).start()
+        except Exception as error:
+            self.research_var.set(f"{archive_code}: selected match failed")
+            messagebox.showerror("eBay Visual Match", str(error))
+
+    def _run_sell_one_like_this(self, archive_code: str, search_id: str, match: VisualMatch, files: list[Path]) -> None:
+        try:
+            if self.ebay_browser is None:
+                raise EbayBrowserError("The eBay page session is not available.")
+            result = self.ebay_browser.prepare_sell_one_like_this(match, files)
+        except Exception as error:
+            self.root.after(0, self._sell_one_like_this_failed, archive_code, error)
+            return
+        self.root.after(0, self._sell_one_like_this_finished, archive_code, result)
+
+    def _sell_one_like_this_failed(self, archive_code: str, error: Exception) -> None:
+        self.research_var.set(f"{archive_code}: Sell one like this failed")
+        messagebox.showerror("eBay Sell One Like This", str(error))
+
+    def _sell_one_like_this_finished(self, archive_code: str, result: object) -> None:
+        self.research_var.set(f"{archive_code}: eBay listing draft prepared")
+        draft_url = getattr(result, "draft_url", "")
+        messagebox.showinfo(
+            "eBay Sell One Like This",
+            "eBay created the prefilled listing draft and Ezcan uploaded the archived media.\n\n"
+            f"Draft page:\n{draft_url}\n\nYour custom title and HTML description will be applied by the category template step.",
+        )
 
     def record_selected_candidate(self) -> None:
         selected = self.tree.selection()
@@ -2188,12 +2669,13 @@ class DesktopWindow:
         dialog.title(f"Review Listing Draft - {archive_code}")
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.geometry("760x640")
-        dialog.minsize(640, 520)
+        dialog.geometry("760x760")
+        dialog.minsize(640, 650)
         body = tk.Frame(dialog, bg=self.panel, padx=24, pady=20)
         body.pack(fill="both", expand=True)
         tk.Label(body, text=f"LOCAL DRAFT  //  {archive_code}", bg=self.panel, fg=self.magenta, font=("Consolas", 11, "bold")).pack(anchor="w")
-        status_var = tk.StringVar(value=f"Review status: {listing['status']}  |  Never published")
+        price_state = "Price confirmed" if draft.get("priceConfirmed") is True else "Price requires agreement"
+        status_var = tk.StringVar(value=f"Review status: {listing['status']}  |  {price_state}  |  Never published")
         tk.Label(body, textvariable=status_var, bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(anchor="w", pady=(5, 16))
         tk.Label(
             body,
@@ -2250,11 +2732,66 @@ class DesktopWindow:
         tk.Label(body, text="TITLE", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w")
         title_var = tk.StringVar(value=str(draft.get("title", "")))
         tk.Entry(body, textvariable=title_var, width=80).pack(fill="x", pady=(4, 14))
+        listing_rules = tk.Frame(body, bg=self.panel_alt, highlightthickness=1, highlightbackground=self.border)
+        listing_rules.pack(fill="x", pady=(0, 14))
+        tk.Label(listing_rules, text="LISTING RULES", bg=self.panel_alt, fg=self.magenta, font=("Consolas", 8, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", padx=12, pady=(10, 6))
+        card_name_var = tk.StringVar(value=str(draft.get("itemSpecifics", {}).get("cardName", card.get("card_name") or "")))
+        category_var = tk.StringVar(value=str(draft.get("storeCategory", "Non-TCG")))
+        saved_product_type = str(draft.get("productType", "")).strip()
+        product_type_key = product_template_key(saved_product_type) if saved_product_type else (
+            infer_product_template(str(draft.get("title", ""))) or "japanese_tcg_old_back"
+        )
+        product_type_labels = product_template_choices()
+        product_type_label_by_key = {
+            product_template_key(label): label for label in product_type_labels
+        }
+        product_type_var = tk.StringVar(value=product_type_label_by_key[product_type_key])
+        tk.Label(listing_rules, text="CARD NAME", bg=self.panel_alt, fg=self.muted, font=("Consolas", 8, "bold")).grid(row=1, column=0, sticky="w", padx=(12, 6), pady=(0, 10))
+        tk.Entry(listing_rules, textvariable=card_name_var, width=23).grid(row=1, column=1, sticky="ew", pady=(0, 10))
+        tk.Label(listing_rules, text="CATEGORY", bg=self.panel_alt, fg=self.muted, font=("Consolas", 8, "bold")).grid(row=1, column=2, sticky="w", padx=(16, 6), pady=(0, 10))
+        ttk.Combobox(listing_rules, textvariable=category_var, values=STORE_CATEGORIES, state="readonly", width=12).grid(row=1, column=3, sticky="w", padx=(0, 12), pady=(0, 10))
+        tk.Label(listing_rules, text="VINTAGE  ✓", bg=self.panel_alt, fg=self.blue, font=("Consolas", 8, "bold")).grid(row=2, column=0, sticky="w", padx=12, pady=(0, 10))
+        tk.Label(listing_rules, text="CONDITION  POOR", bg=self.panel_alt, fg=self.blue, font=("Consolas", 8, "bold")).grid(row=2, column=1, sticky="w", pady=(0, 10))
+        tk.Label(listing_rules, text="GRADING  UNGRADED", bg=self.panel_alt, fg=self.blue, font=("Consolas", 8, "bold")).grid(row=2, column=2, columnspan=2, sticky="w", padx=(16, 0), pady=(0, 10))
+        tk.Label(listing_rules, text="PRODUCT LINE", bg=self.panel_alt, fg=self.muted, font=("Consolas", 8, "bold")).grid(row=3, column=0, sticky="w", padx=12, pady=(0, 12))
+        product_type_box = ttk.Combobox(listing_rules, textvariable=product_type_var, values=product_type_labels, state="readonly", width=28)
+        product_type_box.grid(row=3, column=1, columnspan=3, sticky="ew", padx=(0, 12), pady=(0, 12))
+        tk.Label(listing_rules, text="INTERNAL DESCRIPTION TEMPLATE  •  EBAY CATEGORY REMAINS TCG", bg=self.panel_alt, fg=self.muted, font=("Segoe UI", 8)).grid(row=4, column=1, columnspan=3, sticky="w", padx=(0, 12), pady=(0, 10))
+        listing_rules.grid_columnconfigure(1, weight=1)
         tk.Label(body, text="DESCRIPTION", bg=self.panel, fg=self.muted, font=("Consolas", 8, "bold")).pack(anchor="w")
         description = tk.Text(body, height=12, width=80, wrap="word")
         description.pack(fill="both", expand=True, pady=(4, 14))
         description.insert("1.0", str(draft.get("description", "")))
-        note = tk.Label(body, text="This is a local review record. Ezcan has no publish action in this release.", bg=self.panel, fg=self.cyan, font=("Segoe UI", 9), wraplength=700, justify="left")
+
+        def load_product_template(_event: object = None) -> None:
+            specifics = draft.get("itemSpecifics", {})
+            if not isinstance(specifics, dict):
+                specifics = {}
+            template_text = render_product_template(
+                product_template_key(product_type_var.get()),
+                card_name=card_name_var.get(),
+                set_name=str(specifics.get("set", card.get("set_name") or "")),
+                card_number=str(specifics.get("cardNumber", card.get("card_number") or "")),
+            )
+            template_text += (
+                f"\n\nLanguage: {specifics.get('language', card.get('language') or '')}."
+                f"\nCondition: Poor.\nGrading: Ungraded.\nArchive code: {archive_code}."
+            )
+            description.delete("1.0", "end")
+            description.insert("1.0", enforce_condition_disclaimer(template_text))
+
+        product_type_box.bind("<<ComboboxSelected>>", load_product_template)
+        suggested = draft.get("suggestedPrice", {})
+        suggested_low = str(suggested.get("low", ""))
+        suggested_high = str(suggested.get("high", ""))
+        price_var = tk.StringVar(value=str(draft.get("listingPrice") or suggested_high))
+        price_box = tk.Frame(body, bg=self.panel_alt, highlightthickness=1, highlightbackground=self.border)
+        price_box.pack(fill="x", pady=(0, 14))
+        tk.Label(price_box, text=f"SUGGESTED PRICE  ${suggested_low} - ${suggested_high}", bg=self.panel_alt, fg=self.green, font=("Consolas", 9, "bold")).pack(side="left", padx=12, pady=10)
+        tk.Label(price_box, text="PRICE TO LIST  $", bg=self.panel_alt, fg=self.muted, font=("Consolas", 8, "bold")).pack(side="left", padx=(18, 4), pady=10)
+        tk.Entry(price_box, textvariable=price_var, width=12).pack(side="left", pady=10)
+        tk.Label(price_box, text="Saving this review confirms the suggested or manual price.", bg=self.panel_alt, fg=self.muted, font=("Segoe UI", 8)).pack(side="left", padx=12, pady=10)
+        note = tk.Label(body, text="Approve this draft locally, then publish it directly from the computer through the eBay Seller API.", bg=self.panel, fg=self.cyan, font=("Segoe UI", 9), wraplength=700, justify="left")
         note.pack(anchor="w", pady=(0, 16))
 
         buttons = tk.Frame(body, bg=self.panel)
@@ -2262,11 +2799,19 @@ class DesktopWindow:
 
         def save_review() -> None:
             try:
-                self.store.update_listing_draft(archive_code, title_var.get(), description.get("1.0", "end"))
+                self.store.update_listing_draft(
+                    archive_code,
+                    title_var.get(),
+                    description.get("1.0", "end"),
+                    card_name=card_name_var.get(),
+                    store_category=category_var.get(),
+                    product_type=product_type_var.get(),
+                    price=price_var.get(),
+                )
             except ValueError as error:
                 messagebox.showerror("Review Listing Draft", str(error), parent=dialog)
                 return
-            status_var.set("Review status: reviewed  |  Never published")
+            status_var.set("Review status: reviewed  |  Price confirmed  |  Never published")
             self.draft_var.set(f"{archive_code}: draft reviewed")
             self.refresh()
 
@@ -2277,6 +2822,10 @@ class DesktopWindow:
                 messagebox.showerror("Review Listing Draft", str(error), parent=dialog)
                 return
             status_var.set(f"Review status: {status}  |  Never published")
+            if status == "approved":
+                publish_button.configure(state="normal")
+            else:
+                publish_button.configure(state="disabled")
             self.draft_var.set(f"{archive_code}: draft {status}")
             self.refresh()
 
@@ -2290,13 +2839,246 @@ class DesktopWindow:
             self.draft_var.set(f"{archive_code}: draft regenerated")
             self.refresh()
 
+        def publish() -> None:
+            self.publish_selected_card_to_ebay(archive_code, dialog)
+
         tk.Button(buttons, text="SAVE REVIEW", command=save_review).pack(side="left")
         tk.Button(buttons, text="APPROVE LOCALLY", command=lambda: set_status("approved")).pack(side="left", padx=(8, 0))
         tk.Button(buttons, text="REJECT", command=lambda: set_status("rejected")).pack(side="left", padx=(8, 0))
         tk.Button(buttons, text="REGENERATE", command=regenerate).pack(side="left", padx=(8, 0))
+        publish_button = tk.Button(buttons, text="PUBLISH TO EBAY", command=publish, bg=self.cyan, fg=self.text, relief="flat", padx=12, pady=5, cursor="hand2")
+        publish_button.pack(side="left", padx=(8, 0))
+        if listing["status"] != "approved":
+            publish_button.configure(state="disabled")
         tk.Button(buttons, text="CLOSE", command=dialog.destroy).pack(side="right")
         dialog.bind("<Escape>", lambda _event: dialog.destroy())
         dialog.focus_force()
+
+    def print_archive_labels(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Print Archive ID Labels")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("760x590")
+        dialog.minsize(680, 520)
+        body = tk.Frame(dialog, bg=self.panel, padx=28, pady=24)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text="ARCHIVE ID LABELS", bg=self.panel, fg=self.cyan, font=("Consolas", 11, "bold")).pack(anchor="w")
+        tk.Label(body, text="Print a numbered session, then use each label in order.", bg=self.panel, fg=self.text, font=("Bahnschrift", 18, "bold")).pack(anchor="w", pady=(5, 2))
+        tk.Label(body, text="Ezcan keeps the sequence automatically. Reprinting only offers the unused tail of an earlier session.", bg=self.panel, fg=self.muted, font=("Segoe UI", 9), wraplength=680, justify="left").pack(anchor="w", pady=(0, 20))
+
+        new_panel = tk.Frame(body, bg=self.panel_alt, highlightthickness=1, highlightbackground=self.border)
+        new_panel.pack(fill="x", pady=(0, 20))
+        tk.Label(new_panel, text="NEW PRINT SESSION", bg=self.panel_alt, fg=self.blue, font=("Consolas", 9, "bold")).grid(row=0, column=0, columnspan=5, sticky="w", padx=16, pady=(14, 9))
+        tk.Label(new_panel, text="Labels needed", bg=self.panel_alt, fg=self.muted, font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", padx=(16, 7), pady=(0, 14))
+        count_var = tk.StringVar(value="50")
+        tk.Spinbox(new_panel, from_=1, to=1000, textvariable=count_var, width=7, font=("Consolas", 11)).grid(row=1, column=1, sticky="w", pady=(0, 14))
+        tk.Label(new_panel, text="Paper", bg=self.panel_alt, fg=self.muted, font=("Segoe UI", 9)).grid(row=1, column=2, sticky="e", padx=(20, 7), pady=(0, 14))
+        paper_var = tk.StringVar(value="A4")
+        ttk.Combobox(new_panel, textvariable=paper_var, values=("A4", "Letter"), state="readonly", width=9).grid(row=1, column=3, sticky="w", padx=(0, 16), pady=(0, 14))
+
+        session_list = tk.Listbox(body, height=8, exportselection=False, font=("Consolas", 10), bg=self.panel_deep, fg=self.text, selectbackground="#d8f5f6", selectforeground=self.text, relief="flat", highlightthickness=1, highlightbackground=self.border)
+        session_rows: list[sqlite3.Row] = []
+
+        def refresh_sessions() -> None:
+            session_rows.clear()
+            session_rows.extend(self.store.label_batches())
+            session_list.delete(0, tk.END)
+            for row in session_rows:
+                session_list.insert(tk.END, f"{str(row['created_at'])[:10]}   {row['start_code']} - {row['end_code']}   {row['assigned_count']}/{row['requested_count']} used   {row['remaining_count']} remaining")
+            if not session_rows:
+                session_list.insert(tk.END, "No label sessions yet")
+
+        def open_sheet(codes: list[str], batch_id: str | None, label: str) -> None:
+            output_dir = self.store.root / "Label Prints"
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            destination = output_dir / f"archive-labels-{label}-{timestamp}.html"
+            try:
+                build_label_sheet(codes, destination, paper=paper_var.get())
+                if batch_id:
+                    self.store.record_label_batch_file(batch_id, destination)
+                if not webbrowser.open_new_tab(destination.resolve().as_uri()):
+                    raise OSError("The print sheet could not be opened in the browser")
+            except (OSError, ValueError) as error:
+                messagebox.showerror("Print Archive Labels", f"Could not create the print sheet.\n\n{error}", parent=dialog)
+                return
+            messagebox.showinfo("Print Archive Labels", f"Print sheet ready with {len(codes)} labels.\n\nUse 100% scale and turn off browser headers and footers.\n\nSaved locally at:\n{destination}", parent=dialog)
+
+        def create_session() -> None:
+            try:
+                count = int(count_var.get())
+            except ValueError:
+                messagebox.showerror("New Print Session", "Enter a whole number of labels.", parent=dialog)
+                return
+            try:
+                batch_id, codes = self.store.reserve_label_batch(count)
+            except (RuntimeError, ValueError) as error:
+                messagebox.showerror("New Print Session", str(error), parent=dialog)
+                return
+            open_sheet(codes, batch_id, f"new-{codes[0]}-{codes[-1]}")
+            refresh_sessions()
+
+        tk.Button(new_panel, text="PRINT NEW SESSION", command=create_session, bg=self.blue, fg="white", relief="flat", padx=12, pady=5, cursor="hand2").grid(row=1, column=4, padx=(16, 16), pady=(0, 14))
+        new_panel.grid_columnconfigure(2, weight=1)
+        tk.Label(body, text="EARLIER PRINT SESSIONS", bg=self.panel, fg=self.magenta, font=("Consolas", 9, "bold")).pack(anchor="w")
+        tk.Label(body, text="Select a session to reprint its remaining labels.", bg=self.panel, fg=self.muted, font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 8))
+        session_list.pack(fill="both", expand=True)
+
+        def reprint_remaining() -> None:
+            selection = session_list.curselection()
+            if not selection or not session_rows:
+                messagebox.showinfo("Reprint Labels", "Select an earlier print session first.", parent=dialog)
+                return
+            row = session_rows[selection[0]]
+            try:
+                codes = self.store.reprint_label_batch(str(row["batch_id"]))
+            except ValueError as error:
+                messagebox.showinfo("Reprint Labels", str(error), parent=dialog)
+                return
+            open_sheet(codes, str(row["batch_id"]), f"reprint-{codes[0]}-{codes[-1]}")
+            refresh_sessions()
+
+        refresh_sessions()
+        actions = tk.Frame(body, bg=self.panel)
+        actions.pack(fill="x", pady=(14, 0))
+        tk.Button(actions, text="REPRINT REMAINING", command=reprint_remaining, bg=self.magenta, fg="white", relief="flat", padx=12, pady=6, cursor="hand2").pack(side="left")
+        tk.Button(actions, text="CLOSE", command=dialog.destroy, relief="flat", padx=14, pady=6, cursor="hand2").pack(side="right")
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.focus_force()
+
+    def publish_selected_card_to_ebay(self, archive_code: str, dialog: tk.Toplevel | None = None) -> None:
+        """Publish one approved local draft through the computer-side API."""
+        config = self.ebay_oauth.config
+        if not config.publishing_configured:
+            messagebox.showinfo(
+                "eBay Seller API",
+                "The seller API is connected, but listing settings are incomplete.\n\n"
+                "Configure EBAY_CATEGORY_ID, EBAY_MERCHANT_LOCATION_KEY, "
+                "EBAY_FULFILLMENT_POLICY_ID, EBAY_PAYMENT_POLICY_ID, and "
+                "EBAY_RETURN_POLICY_ID on the computer.",
+                parent=dialog,
+            )
+            return
+        listing = self.store.latest_listing_draft(archive_code)
+        card = self.store.card_by_archive_code(archive_code)
+        if listing is None or card is None:
+            messagebox.showerror("Publish to eBay", "The local card or draft was not found.", parent=dialog)
+            return
+        if listing["status"] != "approved":
+            messagebox.showinfo("Publish to eBay", "Approve the local draft before publishing it.", parent=dialog)
+            return
+        if listing["ebay_publish_status"] != "published":
+            try:
+                draft_preview = json.loads(Path(listing["draft_path"]).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                messagebox.showerror("Publish to eBay", f"The local draft could not be read.\n\n{error}", parent=dialog)
+                return
+            if draft_preview.get("priceConfirmed") is not True:
+                messagebox.showinfo("Publish to eBay", "Confirm the suggested price or enter a manual price before publishing.", parent=dialog)
+                return
+        if listing["ebay_publish_status"] == "published" and listing["ebay_listing_id"]:
+            messagebox.showinfo("Publish to eBay", f"This archive ID is already published as {listing['ebay_listing_id']}.", parent=dialog)
+            return
+        try:
+            draft = json.loads(Path(listing["draft_path"]).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            messagebox.showerror("Publish to eBay", f"The local draft could not be read.\n\n{error}", parent=dialog)
+            return
+        image_paths = [Path(str(path)) for path in draft.get("imagePaths", []) if str(path).strip()]
+        if not image_paths:
+            messagebox.showerror("Publish to eBay", "The local draft contains no card images.", parent=dialog)
+            return
+        item_specifics = draft.get("itemSpecifics", {})
+        aspect_names = {
+            "language": "Language",
+            "cardName": "Character",
+            "set": "Set",
+            "cardNumber": "Card Number",
+            "edition": "Edition",
+            "printing": "Printing",
+            "finish": "Finish",
+            "condition": "Card Condition",
+            "gradeCompany": "Professional Grader",
+            "grade": "Grade",
+            "vintage": "Vintage",
+        }
+        aspects = {
+            aspect_names[key]: [str(value)]
+            for key, value in item_specifics.items()
+            if key in aspect_names and str(value or "").strip() and str(value).lower() != "none"
+        }
+        suggested_price = draft.get("suggestedPrice", {})
+        price = str(draft.get("listingPrice") or suggested_price.get("high") or "0").strip()
+        if not price or price == "0":
+            messagebox.showerror("Publish to eBay", "The draft has no listing price.", parent=dialog)
+            return
+        store_category = str(draft.get("storeCategory") or config.store_category)
+        if store_category not in STORE_CATEGORIES:
+            messagebox.showerror("Publish to eBay", "The draft has an invalid store category.", parent=dialog)
+            return
+        try:
+            self.ebay_sell.validate_fixed_item_location(config.merchant_location_key)
+            self.ebay_sell.validate_fixed_shipping_policy(config.fulfillment_policy_id)
+            branding_urls = self.ensure_store_branding()
+            self.store.update_ebay_publish_state(archive_code, "publishing", error=None)
+            result = self.ebay_sell.publish_listing(
+                archive_code,
+                title=str(draft.get("title", "")),
+                description_html=fill_store_branding(
+                    str(draft.get("descriptionHtml") or draft.get("description", "")),
+                    branding_urls,
+                ),
+                image_paths=image_paths,
+                video_paths=[Path(str(path)) for path in draft.get("videoPaths", []) if str(path).strip()],
+                aspects=aspects,
+                category_id=config.category_id,
+                price=price,
+                merchant_location_key=config.merchant_location_key,
+                fulfillment_policy_id=config.fulfillment_policy_id,
+                payment_policy_id=config.payment_policy_id,
+                return_policy_id=config.return_policy_id,
+                condition="USED",
+                store_category_names=[store_category],
+            )
+            self.store.update_ebay_publish_state(
+                archive_code,
+                "published",
+                offer_id=str(result["offerId"]),
+                listing_id=str(result["listingId"]),
+                image_urls=[str(url) for url in result["imageUrls"]],
+            )
+            draft["publishing"] = {"published": True, "sellerCredentialsUsed": True}
+            draft["ebay"] = result
+            Path(listing["draft_path"]).write_text(json.dumps(draft, indent=2), encoding="utf-8")
+        except Exception as error:
+            self.store.update_ebay_publish_state(archive_code, "failed", error=str(error))
+            messagebox.showerror("Publish to eBay", f"The listing was not published.\n\n{error}", parent=dialog)
+            self.refresh()
+            return
+        self.draft_var.set(f"{archive_code}: published to eBay")
+        self.refresh()
+        if dialog is not None and dialog.winfo_exists():
+            dialog.destroy()
+        messagebox.showinfo("Publish to eBay", f"Published archive {archive_code} directly to eBay.\n\nListing ID: {result['listingId']}")
+
+    def ensure_store_branding(self) -> dict[str, str]:
+        """Upload the supplied store artwork once and reuse eBay HTTPS URLs."""
+        paths = branding_asset_paths()
+        missing = [str(path) for path in paths.values() if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(
+                "Store branding artwork is missing:\n" + "\n".join(missing)
+            )
+        urls = self.store.load_branding_urls()
+        for key, path in paths.items():
+            if str(urls.get(key, "")).lower().startswith("https://"):
+                continue
+            urls[key] = self.ebay_sell.upload_image(path)
+        required = required_description_assets()
+        if not all(str(urls.get(key, "")).lower().startswith("https://") for key in required):
+            raise EbayIntegrationError("Store branding images could not be hosted securely by eBay.")
+        self.store.save_branding_urls(urls)
+        return urls
 
     def copy_text(self, value: str) -> None:
         self.root.clipboard_clear()
@@ -2316,6 +3098,8 @@ class DesktopWindow:
         if self.closing:
             return
         self.closing = True
+        if self.ebay_browser is not None:
+            self.ebay_browser.close()
         self.server.should_exit = True
         self.root.quit()
 

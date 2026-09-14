@@ -177,6 +177,7 @@ struct LocalReceiverClient {
 enum ReceiverError: LocalizedError {
     case invalidEndpoint
     case serverRejected
+    case missingArchiveCode
 
     var errorDescription: String? {
         switch self {
@@ -184,6 +185,8 @@ enum ReceiverError: LocalizedError {
             return "The paired computer address is invalid."
         case .serverRejected:
             return "The computer rejected the request. Check its logs and try again."
+        case .missingArchiveCode:
+            return "The computer did not assign an archive ID. Try starting the card again."
         }
     }
 }

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Iterable, Mapping
 
+from listing_rules import SHIPPING_FLAT_RATE
+
 
 CENT = Decimal("0.01")
 
@@ -42,7 +44,7 @@ def _rounded(value: Decimal) -> Decimal:
 
 def recommend_price(
     candidates: Iterable[Mapping[str, object]],
-    owner_first_item_shipping: object = "34.00",
+    owner_first_item_shipping: object = SHIPPING_FLAT_RATE,
     fee_rate: object = "0.1325",
 ) -> PricingRecommendation:
     sold_totals: list[Decimal] = []

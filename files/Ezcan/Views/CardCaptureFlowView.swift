@@ -57,6 +57,8 @@ struct CardCaptureFlowView: View {
     @State private var isCameraDismissing = false
     @State private var pendingUpload: PendingUpload?
     @State private var frontPhotoURL: URL?
+    @State private var archiveScannerPresented = false
+    @State private var archiveScanMessage: String?
 
     var body: some View {
         ZStack {
@@ -99,6 +101,20 @@ struct CardCaptureFlowView: View {
                     cameraStage = nil
                     isCameraDismissing = false
                     goBack(from: stage)
+                }
+            )
+            .ignoresSafeArea()
+        }
+        .fullScreenCover(isPresented: $archiveScannerPresented) {
+            QRScannerView(
+                title: "Scan Archive Label",
+                instruction: "Point at the QR code on the printed card label",
+                onPayload: { payload in
+                    archiveScannerPresented = false
+                    confirmArchiveLabel(payload)
+                },
+                onCancel: {
+                    archiveScannerPresented = false
                 }
             )
             .ignoresSafeArea()
@@ -236,7 +252,7 @@ struct CardCaptureFlowView: View {
                     optionButton("Files from computer", "Download an IPA or other shared file", "arrow.down.circle.fill", EzcanTheme.green) {
                         sharedFilesPresented = true
                     }
-                    optionButton("Next", "Choose the archive code", "arrow.right.circle.fill", EzcanTheme.blue) {
+                    optionButton("Next", "Review the assigned archive ID", "arrow.right.circle.fill", EzcanTheme.blue) {
                         phase = .naming
                     }
                     .disabled(!requiredPhotosCaptured)
@@ -380,23 +396,38 @@ struct CardCaptureFlowView: View {
                     .font(.title2.bold())
                     .foregroundStyle(EzcanTheme.ink)
                 listingDetailsView
-                TextField("A2B4", text: $archiveCode)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .keyboardType(.asciiCapable)
-                    .font(.system(size: 32, weight: .bold, design: .monospaced))
-                    .multilineTextAlignment(.center)
-                    .padding(.vertical, 16)
-                    .foregroundStyle(EzcanTheme.ink)
-                    .background(EzcanTheme.panelDeep, in: Capsule())
-                    .overlay {
-                        Capsule()
-                            .stroke(ArchiveCodeRules.isValid(archiveCode) ? EzcanTheme.green : EzcanTheme.line, lineWidth: 2)
-                    }
-                    .onChange(of: archiveCode) { _, value in
-                        archiveCode = ArchiveCodeRules.filtered(value)
-                    }
-                    .frame(maxWidth: 360)
+                VStack(spacing: 8) {
+                    Text("ASSIGNED AUTOMATICALLY")
+                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                        .foregroundStyle(EzcanTheme.muted)
+                    Text(archiveCode)
+                        .font(.system(size: 32, weight: .bold, design: .monospaced))
+                        .foregroundStyle(EzcanTheme.ink)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 16)
+                        .background(EzcanTheme.panelDeep, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(EzcanTheme.green, lineWidth: 2)
+                        }
+                    Text("Use the matching printed label for this card. No typing is required.")
+                        .font(.footnote)
+                        .foregroundStyle(EzcanTheme.muted)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: 360)
+                Button {
+                    archiveScannerPresented = true
+                } label: {
+                    Label("Confirm printed label", systemImage: "qrcode.viewfinder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(EzcanSecondaryButtonStyle())
+                .frame(maxWidth: 360)
+                if let archiveScanMessage {
+                    statusBanner(archiveScanMessage)
+                        .frame(maxWidth: 360)
+                }
                 HStack(spacing: 12) {
                     Button {
                         phase = .options
@@ -634,15 +665,27 @@ struct CardCaptureFlowView: View {
         guard let pairing = pairingStore.pairing else { return }
         do {
             let receipt = try await LocalReceiverClient(pairing: pairing).createIntake(note: nil)
+            guard let assignedCode = receipt.suggestedArchiveCode else {
+                throw ReceiverError.missingArchiveCode
+            }
             await MainActor.run {
                 intakeID = receipt.intakeId
-                archiveCode = receipt.suggestedArchiveCode ?? ArchiveCodeRules.suggested()
+                archiveCode = assignedCode
                 phase = .capturing(.front)
             }
         } catch {
             await MainActor.run {
                 phase = .failed(error.localizedDescription)
             }
+        }
+    }
+
+    private func confirmArchiveLabel(_ payload: String) {
+        let scanned = payload.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if scanned == archiveCode {
+            archiveScanMessage = "Printed label confirmed: \(archiveCode)"
+        } else {
+            archiveScanMessage = "Wrong label scanned. Expected \(archiveCode), found \(scanned)."
         }
     }
 
@@ -772,6 +815,8 @@ struct CardCaptureFlowView: View {
         statusMessage = nil
         completionError = nil
         frontPhotoURL = nil
+        archiveScanMessage = nil
+        archiveScannerPresented = false
         hasStarted = false
         isCameraDismissing = false
         cardGeneration += 1

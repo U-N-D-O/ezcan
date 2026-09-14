@@ -20,7 +20,7 @@ The capture camera has an `AUTO` lens mode that watches focus distance and cente
 - Upload the intake to the computer.
 - Display the sequential archive code returned by the computer.
 
-The computer program owns card identification, eBay Picture Search, pricing, listing drafts, and permanent inventory records. Before archiving, the iPhone records the manual listing details: Japanese is the default language, English must be selected explicitly, and raw condition or grading company/grade is chosen by the owner. Authenticity is assumed after the owner's inspection.
+The computer program owns card identification, eBay Picture Search, pricing, listing drafts, permanent inventory records, and the responsive eBay-safe HTML description generated for each archive ID. Before archiving, the iPhone records the manual listing details: Japanese is the default language, English must be selected explicitly, and raw condition or grading company/grade is chosen by the owner. Authenticity is assumed after the owner's inspection.
 
 ## Build Locally
 
@@ -125,6 +125,6 @@ Build the executable locally:
 python make_ezcan_exe.py --no-pause
 ```
 
-Build `EzcanComputer.exe` locally on the Windows computer with the command above. The output is placed at the repository root. The Windows workflow at `.github/workflows/build-windows.yml` runs the computer tests, builds `EzcanComputer.exe`, and uploads it as the `ezcan-windows-exe` artifact. The computer supports a visible, manual eBay Picture Search handoff, sold and active match recording, identity confirmation, shipping-aware pricing, and unpublished local listing drafts. Market research uses a separate search-only eBay account, retains sold and active prices with shipping separately, and compares total buyer cost. The owner's pricing model is `$34 USD` shipping for the first card in an order and free shipping for additional cards.
+Build `EzcanComputer.exe` locally on the Windows computer with the command above. The output is placed at the repository root. The Windows workflow at `.github/workflows/build-windows.yml` runs the computer tests, builds `EzcanComputer.exe`, and uploads it as the `ezcan-windows-exe` artifact. The computer supports eBay visual search with five selectable matches, Sell One Like This media preparation, sold and active match recording, identity confirmation, shipping-aware pricing, and listing drafts. Market research retains sold and active prices with shipping separately, and compares total buyer cost. The owner's pricing model is `$35 USD` flat-rate shipping for domestic and international orders.
 
 Use `SIGN IN / OPEN EBAY` in the desktop pairing panel to open the separate search-only account profile. Sign in manually in the visible browser and confirm with `I'M SIGNED IN`; `REMOVE SESSION` deletes the local profile. Picture Search remains user-assisted at the camera/file chooser and never bypasses login, CAPTCHA, or two-factor challenges. Seller OAuth and live publishing are disabled.

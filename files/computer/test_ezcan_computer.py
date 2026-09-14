@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from archive_labels import build_label_sheet
 from ebay import open_picture_search
 from ebay_account import EbayAccountManager
 from ezcan_computer import Store, card_action_availability, create_app, default_data_root, increment_archive_code, listing_draft_evidence_text, program_directory
@@ -84,11 +85,11 @@ def test_listing_draft_evidence_text_surfaces_stored_market_assumptions() -> Non
                 "estimatedProfitBeforeCostsHigh": "42.34",
             },
             "suggestedPrice": {"low": "72.00", "high": "88.00", "buyerTotalLow": "72.00", "buyerTotalHigh": "88.00"},
-            "shipping": {"firstItemCharge": "34.00", "additionalItemsCharge": "0.00"},
+                "shipping": {"firstItemCharge": "35.00", "additionalItemsCharge": "0.00"},
         }
     )
     assert "SOLD 3  |  ACTIVE 2" in evidence
-    assert "OWNER FIRST-ITEM SHIP $34.00" in evidence
+    assert "OWNER FIRST-ITEM SHIP $35.00" in evidence
     assert "PROFIT BEFORE COSTS $36.46-$42.34" in evidence
     assert listing_draft_evidence_text({}) == "RESEARCH EVIDENCE\nUnavailable in this draft"
 
@@ -117,7 +118,7 @@ def test_legacy_database_is_backed_up_before_schema_upgrade(tmp_path: Path) -> N
     assert {"grade_company", "grade"}.issubset(columns)
     intake_columns = {row[1] for row in connection.execute("PRAGMA table_info(intakes)")}
     assert "details_json" in intake_columns
-    assert version == "3"
+    assert version == "5"
     assert len(list((root / "Backups").glob("ezcan-before-migration-*.sqlite3"))) == 1
 
 
@@ -738,7 +739,19 @@ def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path)
     listing = app.state.store.latest_listing_draft(archive_code)
     assert draft["status"] == "draft"
     assert draft["title"] == "Japanese | Charizard | Base Set | 4/102"
-    assert draft["shipping"] == {"firstItemCharge": "34.00", "additionalItemsCharge": "0.00"}
+    assert draft["storeCategory"] == "Non-TCG"
+    assert draft["vintage"] is True
+    assert draft["itemSpecifics"]["condition"] == "Poor"
+    assert draft["itemSpecifics"]["grade"] == "Ungraded"
+    assert "not a trained professional card appraiser" in draft["description"]
+    assert draft["priceConfirmed"] is False
+    assert draft["shipping"]["firstItemCharge"] == "35.00"
+    assert draft["shipping"]["service"] == "Expedited International Shipping"
+    assert draft["shipping"]["transitTime"] == "7 - 15 business days"
+    assert draft["shipping"]["handlingTimeBusinessDays"] == 2
+    assert draft["itemLocation"] == {"countryOrRegion": "Greenland", "city": "Nuuk"}
+    assert draft["payment"] == {"requireImmediatePayment": False, "unpaidOrderWindowDays": 4}
+    assert draft["shipping"]["combinedShipping"] is True
     assert draft["researchStatus"] == "current"
     assert draft["publishing"] == {"published": False, "sellerCredentialsUsed": False}
     assert str(Path(card["folder_path"]) / "generated" / "listing-first.jpg") == draft["imagePaths"][0]
@@ -760,12 +773,14 @@ def test_card_identity_requires_match_and_marks_search_confirmed(tmp_path: Path)
     assert outdated["researchStatus"] == "outdated"
     assert "New market evidence" in outdated["researchNote"]
 
-    app.state.store.update_listing_draft(archive_code, "Reviewed Charizard", "A reviewed local description.")
+    app.state.store.update_listing_draft(archive_code, "Reviewed Charizard", "A reviewed local description.", price="42.00")
     reviewed = json.loads(draft_path.read_text(encoding="utf-8"))
     reviewed_listing = app.state.store.latest_listing_draft(archive_code)
     assert reviewed["title"] == "Reviewed Charizard"
     assert reviewed["reviewStatus"] == "reviewed"
     assert reviewed["publishing"] == {"published": False, "sellerCredentialsUsed": False}
+    assert reviewed["listingPrice"] == "42.00"
+    assert reviewed["priceConfirmed"] is True
     assert reviewed_listing["status"] == "reviewed"
 
     app.state.store.set_listing_status(archive_code, "approved")
@@ -809,9 +824,9 @@ def test_recommend_price_separates_sold_active_and_owner_shipping() -> None:
     assert recommendation.highest_sold_total == 70
     assert recommendation.suggested_total_low == 54
     assert recommendation.suggested_total_high == 66
-    assert recommendation.suggested_item_low == 20
-    assert recommendation.suggested_item_high == 32
-    assert recommendation.owner_shipping_charge == 34
+    assert recommendation.suggested_item_low == 19
+    assert recommendation.suggested_item_high == 31
+    assert recommendation.owner_shipping_charge == 35
 
 
 def test_recommend_price_requires_sold_evidence() -> None:
@@ -821,3 +836,58 @@ def test_recommend_price_requires_sold_evidence() -> None:
         assert "sold comparable" in str(error)
     else:
         raise AssertionError("Expected pricing without sold evidence to fail")
+
+
+def test_label_session_is_sequential_and_claims_ids_in_order(tmp_path: Path) -> None:
+    store = Store(tmp_path / "data")
+    batch_id, codes = store.reserve_label_batch(5)
+
+    assert codes == ["A0A0", "A0A1", "A0A2", "A0A3", "A0A4"]
+    assert store.new_archive_code() == "A0A0"
+    assert store.new_archive_code() == "A0A1"
+
+    batch = store.label_batches()[0]
+    assert batch["batch_id"] == batch_id
+    assert batch["assigned_count"] == 2
+    assert batch["remaining_count"] == 3
+    assert store.reprint_label_batch(batch_id) == ["A0A2", "A0A3", "A0A4"]
+
+
+def test_new_label_session_waits_for_the_previous_session_tail(tmp_path: Path) -> None:
+    store = Store(tmp_path / "data")
+    store.reserve_label_batch(3)
+    try:
+        store.reserve_label_batch(2)
+    except ValueError as error:
+        assert "earlier label session" in str(error)
+    else:
+        raise AssertionError("Expected a pending label tail to block a new session")
+
+
+def test_label_reprint_stops_if_a_session_has_a_gap(tmp_path: Path) -> None:
+    store = Store(tmp_path / "data")
+    batch_id, codes = store.reserve_label_batch(4)
+    assert store.new_archive_code() == codes[0]
+    assert store.new_archive_code() == codes[1]
+    with store.connection() as connection:
+        connection.execute(
+            "UPDATE archive_labels SET status = 'assigned' WHERE archive_code = ?",
+            (codes[3],),
+        )
+
+    try:
+        store.reprint_label_batch(batch_id)
+    except ValueError as error:
+        assert "sequentially" in str(error)
+    else:
+        raise AssertionError("Expected a non-sequential session to stop automatic reprinting")
+
+
+def test_label_sheet_contains_professional_qr_labels(tmp_path: Path) -> None:
+    output = build_label_sheet(["A0A0", "A0A1"], tmp_path / "labels.html")
+    content = output.read_text(encoding="utf-8")
+    assert "SUGIMORI GEM ARCHIVE" in content
+    assert "ARCHIVE ID" in content
+    assert "A0A0" in content and "A0A1" in content
+    assert "data:image/png;base64," in content
+    assert "@page" in content
