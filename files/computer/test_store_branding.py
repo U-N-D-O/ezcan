@@ -14,7 +14,7 @@ def test_store_links_use_normalized_https_urls() -> None:
 
 
 def test_supplied_branding_asset_manifest_contains_both_sets() -> None:
-    asset_root = Path(__file__).resolve().parents[3] / "Store" / "Sugimori Gem Archive" / "Store front"
+    asset_root = Path(__file__).resolve().parents[2] / "Store" / "Sugimori Gem Archive" / "Store front"
     paths = branding_asset_paths(asset_root)
 
     assert all(paths[f"description_{category}"].is_file() for category in ("TCG", "Non-TCG", "PSA", "Bulk"))

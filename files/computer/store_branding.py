@@ -62,8 +62,8 @@ def branding_asset_paths(root: Path | None = None) -> dict[str, Path]:
     elif os.getenv("EZCAN_BRANDING_DIR", "").strip():
         asset_root = Path(os.environ["EZCAN_BRANDING_DIR"].strip()).expanduser()
     else:
-        # Source checkout: workspace/Store/Sugimori Gem Archive/Store front.
-        asset_root = Path(__file__).resolve().parents[3] / _STORE_FRONT
+        # Source checkout and PyInstaller bundle: repository/Store/Sugimori Gem Archive/Store front.
+        asset_root = Path(__file__).resolve().parents[2] / _STORE_FRONT
         if not asset_root.is_dir():
             asset_root = Path.cwd() / _STORE_FRONT
     paths: dict[str, Path] = {}

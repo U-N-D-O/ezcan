@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 FILES_DIR = PROJECT_ROOT / "files"
 SOURCE_FILE = FILES_DIR / "computer" / "ezcan_computer.py"
 ICON_FILE = FILES_DIR / "icons" / "ezcan_logo.ico"
+BRANDING_DIR = PROJECT_ROOT / "Store"
 DIST_DIR = PROJECT_ROOT
 BUILD_DIR = FILES_DIR / "build"
 
@@ -41,6 +43,8 @@ def run_build() -> int:
         "EzcanComputer",
         "--icon",
         str(ICON_FILE),
+        "--add-data",
+        f"{BRANDING_DIR}{os.pathsep}Store",
         "--distpath",
         str(DIST_DIR),
         "--workpath",
